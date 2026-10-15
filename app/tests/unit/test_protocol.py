@@ -60,7 +60,7 @@ PAYLOADS: dict[str, object] = {
     "update_password": {
         "entry_id": "e-1",
         "url": "https://example.com/login",
-        "new_password": "new-pw",
+        "new_password": "pw",
     },
     "generate_password": {"length": 24},
     "lock": {},
