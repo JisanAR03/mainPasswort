@@ -64,14 +64,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   e2e:
-    # Playwright extension tests start in M4.
-    if: hashFiles('app/tests/e2e/**') != ''
+    # Playwright extension tests start in M4. hashFiles is not allowed in a
+    # job-level if, so the job runs as a no-op until app/tests/e2e/ exists.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --all-groups
-      - run: uv run pytest -q -m e2e
+      - name: Extension end-to-end tests
+        if: hashFiles('app/tests/e2e/**') != ''
+        run: uv run pytest -q -m e2e
 
   sensitive-review:
     if: github.event_name == 'pull_request'
