@@ -44,8 +44,10 @@ def _connect() -> IO[bytes]:
     # /tmp is not an arbitrary temp choice: QLocalServer puts socket files in
     # <TMPDIR>/<name>, and the host must connect exactly there
     path = os.path.join(os.environ.get("TMPDIR", "/tmp"), socket_name())  # nosec B108
-    # AF_UNIX is absent from the Windows typeshed stubs but exists at runtime
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)  # type: ignore[attr-defined]
+    # getattr, not attribute access: AF_UNIX is missing from the Windows
+    # typeshed stubs (it exists at runtime), so direct access needs a
+    # platform-dependent type: ignore that Linux mypy rejects as unused
+    sock = socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM)  # noqa: B009
     sock.connect(path)
     return cast(IO[bytes], sock.makefile("rwb", buffering=0))
 
