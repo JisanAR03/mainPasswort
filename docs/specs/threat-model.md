@@ -1,6 +1,6 @@
 # Threat model and security boundaries
 
-> Source: design pack draft v0.1, section 5. Status: proposed until gate G0.
+> Source: design pack v0.1, section 5. Status: accepted at gate G0 (2026-10-15).
 
 The app protects vault files at rest (on disk, in backups and on Google Drive) and limits what
 a web page can extract. It cannot protect you from malware running as your OS user, from a

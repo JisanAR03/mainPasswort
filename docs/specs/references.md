@@ -4,8 +4,8 @@
 
 - **Personal Password Manager: Pre-Build Design Pack**, draft v0.1, dated 2026-10-15
   (38 pages). This is the full project specification. It is kept locally and is not committed
-  to this repository; the documents in `docs/` carry its content. Personal names that appear
-  in it have been left out of these docs on purpose.
+  to this repository; the documents in `docs/specs/` carry its content. Personal names that
+  appear in it have been left out of these docs on purpose.
 
 ## Sources cited by the design pack
 

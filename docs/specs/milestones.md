@@ -1,6 +1,7 @@
 # Milestones
 
-> Source: design pack draft v0.1, sections 10–13. Status: **G0 not passed; M0 not started.**
+> Source: design pack v0.1, sections 10–12. Status: **G0 passed 2026-10-15; M0–M2 built and
+> self-reviewed 2026-10-15 — owner checks pending at G1 and G2.**
 
 Seven milestones, M0 to M6. Each is split into tasks small enough for one AI session, and each
 is closed by a gate that the owner signs off. A milestone is done only when every "Done when"
@@ -20,12 +21,15 @@ fake data first.
 | G4 | M5 | Sync turned on for real vaults |
 | G5 | M6 | Public release, after an outside security review |
 
+G0 passed on 2026-10-15: the owner approved D1 and D3–D10 as proposed, answered Q1–Q5, and
+left D2 (license, Q6) and Q7 (first importer) open. See [docs/adr/](../adr/).
+
 ## Roadmap
 
 | When | Milestones |
 | --- | --- |
-| Now | G0 approval, then M0 spikes and skeleton |
-| Next | M1 vault core, M2 desktop app, M3 bridge and native host |
+| Now | M2 desktop app (M0 and M1 built, G1 sign-off pending; M2 built, G2 review pending) |
+| Next | M3 bridge and native host (after G2 sign-off) |
 | Later | M4 browser extension, M5 Google Drive sync, M6 merge, hardening and release |
 
 Dates stay open until M0 shows how many task cards get finished in a week.
@@ -76,18 +80,18 @@ Tasks:
 
 Done when:
 
-- [ ] Create, close and reopen returns identical entries
-- [ ] A wrong password raises `InvalidPassword` and leaves no partial state
-- [ ] Flipping single bytes at 200 random offsets, or truncating the file, gives a clean
+- [x] Create, close and reopen returns identical entries
+- [x] A wrong password raises `InvalidPassword` and leaves no partial state
+- [x] Flipping single bytes at 200 random offsets, or truncating the file, gives a clean
       error, never a crash or an overwrite
-- [ ] Killing the save process at random moments 200 times always leaves a vault that
+- [x] Killing the save process at random moments 200 times always leaves a vault that
       decrypts (I3)
-- [ ] `keepassxc-cli` lists entries from our vaults in CI
-- [ ] Two profiles cannot open each other's vaults
-- [ ] Canary tests pass for logs and temp folders (I1, I2)
-- [ ] Generator output uses `secrets`, honours every option, and covers each requested
+- [x] `keepassxc-cli` lists entries from our vaults in CI
+- [x] Two profiles cannot open each other's vaults
+- [x] Canary tests pass for logs and temp folders (I1, I2)
+- [x] Generator output uses `secrets`, honours every option, and covers each requested
       character class
-- [ ] Matching tests cover subdomains, look-alike domains, ports, punycode, and http versus
+- [x] Matching tests cover subdomains, look-alike domains, ports, punycode, and http versus
       https
 
 ## M2: Desktop app
@@ -109,8 +113,8 @@ Tasks:
 
 Done when:
 
-- [ ] pytest-qt tests cover idle lock, form validation and clipboard clearing
-- [ ] Plaintext export needs the master password and a typed confirmation (I8)
+- [x] pytest-qt tests cover idle lock, form validation and clipboard clearing
+- [x] Plaintext export needs the master password and a typed confirmation (I8)
 - [ ] A manual test script in `docs/manual-tests.md` passes, run by the owner
 - [ ] The owner has reviewed every `[S]` file from M1 and M2 (gate G2)
 
@@ -231,7 +235,7 @@ One command runs every check, locally and in CI: `uv run python scripts/check.py
 The extension has no npm dependencies. Its tests live in the Python Playwright suite.
 
 **Pre-commit hooks:** ruff, ruff-format, gitleaks, a large-file check, the fast test set, and
-a hook that blocks any `*.kdbx` outside `tests/fixtures/` and any `client_secret*.json`.
+a hook that blocks any `*.kdbx` outside `app/tests/fixtures/` and any `client_secret*.json`.
 
 ### CI pipeline (GitHub Actions)
 
@@ -242,7 +246,7 @@ a hook that blocks any `*.kdbx` outside `tests/fixtures/` and any `client_secret
    history.
 4. **e2e:** Playwright loads the unpacked extension against `extension/test-pages/` (from M4).
 5. **sensitive-review:** fails if a commit changes an `[S]` file without a
-   `Security-Reviewed-By:` trailer, which only the owner adds after reading the diff.
+   `Security-Reviewed-By:` trailer. Where that trailer lives is decided in ADR-009.
 
 `main` is protected: green CI required, no direct pushes, squash merges only.
 

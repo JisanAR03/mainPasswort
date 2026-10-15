@@ -1,0 +1,36 @@
+# Pre-commit hooks. All hooks run with the tools already in the virtualenv
+# (language: system), so `uv sync` is the only setup needed before `pre-commit install`.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: ruff check
+        language: system
+        types_or: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format --check
+        language: system
+        types_or: [python]
+      - id: gitleaks
+        name: gitleaks
+        entry: gitleaks protect --staged --redact -v
+        language: system
+        pass_filenames: false
+      - id: large-file
+        name: block files over 500 KB
+        entry: python scripts/pre_commit_large_file.py
+        language: system
+        types: [file]
+      - id: forbidden-files
+        name: block kdbx outside fixtures and client_secret files
+        entry: python scripts/pre_commit_forbidden_files.py
+        language: system
+        files: (?i)(\.kdbx$|client_secret.*\.json$)
+      - id: fast-tests
+        name: fast test set
+        entry: python -m pytest -m "not e2e and not slow" -q
+        language: system
+        pass_filenames: false
+        types_or: [python]

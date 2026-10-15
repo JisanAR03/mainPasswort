@@ -1,6 +1,6 @@
 # Data model and file formats
 
-> Source: design pack draft v0.1, section 6. Status: proposed until gate G0.
+> Source: design pack v0.1, section 6. Status: accepted at gate G0 (2026-10-15).
 
 The app stores four things: a plaintext profile list, one encrypted KDBX 4 vault per profile,
 a plaintext sync-state file per profile, and plaintext settings. Only the vault holds
@@ -48,7 +48,8 @@ with a newer version than the app understands is opened read-only and never over
 ```
 
 The profile ID is random, so renaming a profile never moves files. Display names are visible
-to anyone who can read your disk.
+to anyone who can read your disk. Profiles are labels for one person's own accounts (for
+example Work, Social Media, School) — not a separation between people.
 
 ## Inside each vault (KDBX 4)
 
@@ -59,6 +60,8 @@ to anyone who can read your disk.
 | Cipher | ChaCha20 or AES-256, whichever pykeepass writes reliably (confirmed in M0) |
 | History per entry | 10 previous versions |
 | Groups | `Logins` (default), `Recycle Bin`, `.app` (hidden in our UI) |
+
+Key derivation is calibrated for desktop use only (open question Q3: no phone access).
 
 The hidden `.app` group holds two entries that the app manages:
 
@@ -91,16 +94,19 @@ library replaceable.
 ```python
 class SecretStr:
     """Holds a secret; repr() and str() print '***' so it never lands in logs."""
+
     def reveal(self) -> str: ...
 
-@dataclass(frozen=True)          # what search results and the browser list get
+
+@dataclass(frozen=True)  # what search results and the browser list get
 class LoginSummary:
     id: UUID
     title: str
     username: str
     hosts: tuple[str, ...]
 
-@dataclass                       # what the edit form gets
+
+@dataclass  # what the edit form gets
 class LoginEntry:
     id: UUID
     title: str

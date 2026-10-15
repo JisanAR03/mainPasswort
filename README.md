@@ -3,9 +3,8 @@
 A personal, local-first password manager for the desktop, with a browser extension and
 optional Google Drive sync. The design spec calls it **Personal Vault**.
 
-> **Status: pre-build.** There is no application code yet. The design is a draft (v0.1).
-> Building starts with milestone M0, after every decision in
-> [docs/decisions.md](docs/decisions.md) is approved (gate G0).
+> **Status: G0 approved (2026-10-15), M0 in progress.** There is no application code yet.
+> The design is draft v0.1 of the pre-build design pack.
 
 ## Security limits: read this first
 
@@ -19,14 +18,15 @@ what a web page can extract. It **cannot** protect you from:
 Profiles do not separate people who share one OS login. Anyone with that login can install a
 keylogger, so give each person their own OS account. There is no backdoor: if you forget the
 master password, the vault cannot be opened. See
-[docs/threat-model.md](docs/threat-model.md).
+[docs/specs/threat-model.md](docs/specs/threat-model.md).
 
 ## Features
 
 Planned for v1, the minimum viable version:
 
-- Separate **profiles**, each stored as a standard KeePass **KDBX 4** file, so KeePassXC can
-  always open a vault if this app breaks
+- Separate **profiles** (labels for your own accounts, e.g. Work, Social Media, School),
+  each stored as a standard KeePass **KDBX 4** file, so KeePassXC can always open a vault if
+  this app breaks
 - Add, edit, delete and search logins, plus a password **generator**
 - Manual lock, idle auto-lock, lock on sleep, and clipboard auto-clear
 - Safe saves with a read-back check and rotating encrypted backups
@@ -44,11 +44,12 @@ Firefox and auto-update.
 Python 3.12+, PySide6, pykeepass (KDBX 4), the Google Drive REST API with the `drive.file`
 scope, and a plain-JavaScript Manifest V3 extension with no build step. Tooling: uv, ruff,
 mypy, pytest, pip-audit and gitleaks. The reasons for each choice are in
-[docs/decisions.md](docs/decisions.md).
+[docs/adr/](docs/adr/).
 
 ## Setup
 
-Prerequisites. [docs/milestones.md](docs/milestones.md) shows when each one is first needed.
+Prerequisites. [docs/specs/milestones.md](docs/specs/milestones.md) shows when each one is
+first needed.
 
 - Git
 - Python 3.12 or newer
@@ -60,6 +61,7 @@ Prerequisites. [docs/milestones.md](docs/milestones.md) shows when each one is f
 git clone https://github.com/JisanAR03/mainPasswort.git
 cd mainPasswort
 cp .env.example .env    # local only, never committed
+uv sync                 # create the virtual env from pyproject.toml
 ```
 
 ## How to run
@@ -81,14 +83,16 @@ gate G2.
 
 | Document | Contents |
 | --- | --- |
-| [Architecture](docs/architecture.md) | Components, layer rules, key flows, sync design and browser protocol |
-| [Threat model](docs/threat-model.md) | What is protected, trust boundaries, threats and security invariants I1–I10 |
-| [Decisions](docs/decisions.md) | Decisions D1–D10 awaiting approval, ADRs, open questions and spec gaps |
-| [Data model](docs/data-model.md) | On-disk layout, file formats, vault contents, domain types and site matching |
-| [Milestones](docs/milestones.md) | Gates G0–G5, milestones M0–M6 and the development workflow |
-| [References](docs/references.md) | External references and source material |
+| [Architecture](docs/specs/architecture.md) | Components, layer rules, key flows and the planned project structure |
+| [Threat model](docs/specs/threat-model.md) | What is protected, trust boundaries, threats and security invariants I1–I10 |
+| [Data model](docs/specs/data-model.md) | On-disk layout, file formats, vault contents, domain types and site matching |
+| [Sync spec](docs/specs/sync.md) | Google Drive sync: permissions, decision table, race handling |
+| [Browser protocol](docs/specs/browser-protocol.md) | Extension design, native host, message envelope and message list |
+| [Milestones](docs/specs/milestones.md) | Gates G0–G5, milestones M0–M6 and the development workflow |
+| [ADRs](docs/adr/) | Architecture decision records and the owner's decision log |
+| [References](docs/specs/references.md) | External references and source material |
 
 ## License
 
-No license has been chosen yet. Decision D2 proposes GPL-3.0, because pykeepass is licensed
-under GPL-3.0. Until a license file is added, all rights are reserved.
+No license has been chosen yet (open decision, ADR-007). Until a license file is added, all
+rights are reserved.
