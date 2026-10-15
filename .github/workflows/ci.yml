@@ -40,6 +40,8 @@ jobs:
     # The 200-kill crash-during-save loop (I3); too long for the matrix job.
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -48,6 +50,8 @@ jobs:
 
   security:
     runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
         with:
