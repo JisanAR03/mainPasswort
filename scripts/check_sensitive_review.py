@@ -33,6 +33,12 @@ SENSITIVE_FILES = {
 TRAILER = "Security-Reviewed-By:"
 
 
+def _has_trailer(text: str) -> bool:
+    """True when a line of ``text`` starts with the trailer (not just contains it:
+    a sentence mentioning the trailer must not count as the review itself)."""
+    return any(line.strip().startswith(TRAILER) for line in text.splitlines())
+
+
 def git(*args: str) -> str:
     result = subprocess.run(["git", *args], capture_output=True, text=True, check=True)
     return result.stdout
@@ -49,7 +55,7 @@ def main() -> int:
         print("No [S] files changed; nothing to review.")
         return 0
 
-    if TRAILER in body or TRAILER in git("log", "--format=%B", f"{base}..{head}"):
+    if _has_trailer(body) or _has_trailer(git("log", "--format=%B", f"{base}..{head}")):
         print(f"Trailer found. Reviewed files: {', '.join(sensitive)}")
         return 0
 

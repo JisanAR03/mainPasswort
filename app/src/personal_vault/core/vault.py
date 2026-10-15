@@ -23,11 +23,12 @@ from pykeepass.exceptions import CredentialsError
 
 from personal_vault.core import kdf, storage
 from personal_vault.core.errors import InvalidPassword, VaultCorrupted, VaultError
-from personal_vault.core.matching import host_and_port_of_url
+from personal_vault.core.matching import host_and_port_of_url, match_urls
 from personal_vault.core.models import LoginEntry, LoginSummary, SecretStr
 
 LOGINS_GROUP = "Logins"
 RECYCLE_BIN_GROUP = "Recycle Bin"
+APP_GROUP = ".app"
 MAX_HISTORY = 10
 DEFAULT_KEEP_RECENT = 20
 DEFAULT_KEEP_DAILY = 30
@@ -372,6 +373,22 @@ class VaultSession:
         ]
         return sorted(summaries, key=lambda s: s.title.lower())
 
+    def matching_logins(self, page_url: str) -> list[LoginSummary]:
+        """Logins whose URLs match the page under the site matching rules (I4)."""
+        matches = []
+        for entry in self._logins_group().entries:
+            login = _entry_to_login(entry)
+            if match_urls(login.urls, page_url, match_subdomains=login.match_subdomains):
+                matches.append(
+                    LoginSummary(
+                        id=entry.uuid,
+                        title=entry.title or "",
+                        username=entry.username or "",
+                        hosts=tuple(self._hosts(_entry_urls(entry))),
+                    )
+                )
+        return sorted(matches, key=lambda s: s.title.lower())
+
     def search(self, query: str) -> list[LoginSummary]:
         needle = query.lower()
         results = []
@@ -395,6 +412,33 @@ class VaultSession:
     def history(self, entry_id: uuid.UUID) -> list[LoginEntry]:
         entry = self._find_anywhere(entry_id)
         return [_entry_to_login(item) for item in entry.history]
+
+    # --- hidden .app group ---------------------------------------------------
+
+    def _app_group(self) -> Any:
+        kp = self._open_kp
+        group = kp.find_groups(name=APP_GROUP, first=True)
+        if group is None:
+            group = kp.add_group(kp.root_group, APP_GROUP)
+        return group
+
+    def get_app_value(self, name: str) -> str | None:
+        """Read a value the app stores for itself (pairing key, sync token)."""
+        for entry in self._app_group().entries:
+            if entry.title == name:
+                return entry.password or None
+        return None
+
+    def set_app_value(self, name: str, value: str) -> None:
+        """Store an app value in the hidden .app group; KeePassXC shows a note."""
+        entry = next((e for e in self._app_group().entries if e.title == name), None)
+        if entry is None:
+            entry = self._open_kp.add_entry(
+                self._app_group(), title=name, username="", password=value
+            )
+            entry.notes = "Managed by Personal Vault - do not edit"
+        else:
+            entry.password = value
 
     @staticmethod
     def _hosts(urls: list[str]) -> list[str]:

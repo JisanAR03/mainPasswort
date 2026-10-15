@@ -133,12 +133,12 @@ Tasks:
 
 Done when:
 
-- [ ] Fuzz tests (Hypothesis) send malformed, oversized and unknown messages; every one gets
+- [x] Fuzz tests (Hypothesis) send malformed, oversized and unknown messages; every one gets
       an error reply, and none crash the app
-- [ ] A locked vault answers everything with `locked` (I5)
-- [ ] A password is never returned for a non-matching URL (I4)
-- [ ] Requests without a valid pairing key are refused
-- [ ] A subprocess test speaks real native-messaging framing to the host
+- [x] A locked vault answers everything with `locked` (I5)
+- [x] A password is never returned for a non-matching URL (I4)
+- [x] Requests without a valid pairing key are refused
+- [x] A subprocess test speaks real native-messaging framing to the host
 
 ## M4: Browser extension
 
