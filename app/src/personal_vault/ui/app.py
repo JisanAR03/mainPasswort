@@ -7,6 +7,10 @@ from typing import cast
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
 
+from personal_vault.bridge.backend import VaultBackend
+from personal_vault.bridge.pairing import Pairing
+from personal_vault.bridge.protocol import SOCKET_NAME
+from personal_vault.bridge.server import BridgeServer
 from personal_vault.services import (
     Profile,
     VaultSession,
@@ -17,6 +21,7 @@ from personal_vault.services import (
 )
 from personal_vault.ui.clipboard import ClipboardGuard
 from personal_vault.ui.idle import ActivityFilter, IdleMonitor
+from personal_vault.ui.pairing_dialog import confirm_pairing
 from personal_vault.ui.picker import ProfilePicker
 from personal_vault.ui.unlock import UnlockWindow
 from personal_vault.ui.vault_view import VaultView
@@ -27,6 +32,7 @@ class App(QMainWindow):
         super().__init__()
         self.setWindowTitle("Personal Vault")
         self._session: VaultSession | None = None
+        self._profile: Profile | None = None
         self._unlock: UnlockWindow | None = None
         self._guard: ClipboardGuard | None = None
         self._monitor: IdleMonitor | None = None
@@ -36,11 +42,18 @@ class App(QMainWindow):
         self._stack.addWidget(self._picker)
         self.setCentralWidget(self._stack)
         self._picker.opened.connect(self._on_opened)
+        # The bridge server runs for the app's whole life, so the extension can
+        # ask about the state (and trigger show_unlock) while the vault is locked.
+        self._backend = VaultBackend(None, "", show_unlock=self._show_unlock_requested)
+        self._pairing = Pairing(None, confirm_pairing)
+        self._bridge = BridgeServer(self._backend, self._pairing, parent=self)
+        self._bridge.listen(SOCKET_NAME)
 
     def _on_opened(self, profile_id: str) -> None:
         profile = self._profile_by_id(profile_id)
         if profile is None:
             return
+        self._profile = profile
         self._unlock = UnlockWindow(profile, self)
         self._unlock.unlocked.connect(self._on_unlocked)
         self._stack.addWidget(self._unlock)
@@ -48,6 +61,10 @@ class App(QMainWindow):
 
     def _on_unlocked(self, session: VaultSession) -> None:
         self._session = session
+        if self._profile is not None:
+            self._backend.set_profile(self._profile.display_name)
+        self._backend.set_session(session)
+        self._pairing.set_session(session)
         self._guard = ClipboardGuard(clipboard_clear_seconds(), self)
         self._monitor = IdleMonitor(idle_lock_minutes(), lock_on_sleep(), self)
         self._monitor.locked.connect(self._lock)
@@ -67,6 +84,8 @@ class App(QMainWindow):
 
     def _lock(self) -> None:
         """Drop the session, clear the clipboard, return to the unlock screen."""
+        self._backend.set_session(None)
+        self._pairing.set_session(None)
         if self._guard is not None:
             self._guard.clear()
         if self._monitor is not None:
@@ -83,6 +102,12 @@ class App(QMainWindow):
 
     def _profile_by_id(self, profile_id: str) -> Profile | None:
         return next((p for p in profiles().list() if p.id == profile_id), None)
+
+    def _show_unlock_requested(self) -> None:
+        """The extension sent show_unlock: bring this window to the front."""
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
 
 def run() -> int:

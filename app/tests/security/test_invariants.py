@@ -3,16 +3,22 @@
 I1: secrets never appear in plaintext in the vault file or its backups.
 I2: secrets never reach logs or exception messages.
 I3: a weak-KDF override exists only in the test fixtures.
+I4: the bridge never returns a password for a URL that does not match the entry.
+I5: a locked vault answers every bridge request with ``locked`` and nothing else.
 """
 
 from __future__ import annotations
 
 import ast
+import json
 import logging
+import uuid
 from pathlib import Path
 
 import pytest
 from fixtures.weak_vault import WEAK_PASSWORD, build_weak_vault, make_login
+from personal_vault.bridge.backend import VaultBackend
+from personal_vault.bridge.protocol import VAULT_TYPES, Dispatcher
 from personal_vault.core.errors import InvalidPassword
 from personal_vault.core.models import SecretStr
 from personal_vault.core.redaction import MARKER, RedactionFilter
@@ -114,3 +120,96 @@ def test_i8_plaintext_export_requires_reauth_and_confirmation() -> None:
                         f"{path}: export_csv called without a typed confirmation"
                     )
     assert export_calls >= 1  # the guarded UI path exists at all
+
+
+# --- I4/I5: the bridge, exercised end to end through the real backend ---
+
+BRIDGE_KEY = "pairing-key-test"
+
+
+class _OpenPairing:
+    def key_valid(self, key: str) -> bool:
+        return key == BRIDGE_KEY
+
+    def accept(self, key: str, browser_name: str) -> bool:
+        return False
+
+
+def _request(kind: str, payload: dict[str, object]) -> bytes:
+    return json.dumps(
+        {"v": 1, "id": "req-1", "type": kind, "pairing_key": BRIDGE_KEY, "payload": payload}
+    ).encode()
+
+
+def _dispatcher(session: VaultSession) -> Dispatcher:
+    backend = VaultBackend(session, "Test Profile", show_unlock=lambda: None)
+    return Dispatcher(backend, _OpenPairing())
+
+
+def test_i4_bridge_never_returns_secret_for_a_nonmatching_url(weak_session: VaultSession) -> None:
+    canary = "CANARY-bridge-url-7e2f"
+    entry = make_login(password=SecretStr(canary), urls=["https://example.com"])
+    weak_session.add(entry)
+    weak_session.save()
+    dispatcher = _dispatcher(weak_session)
+
+    # positive control: the matching tab gets the canary (the test is not vacuous)
+    ok_reply = json.loads(
+        dispatcher.dispatch(
+            _request("get_secret", {"entry_id": str(entry.id), "url": "https://example.com/login"})
+        )
+    )
+    assert ok_reply["ok"] is True
+    assert ok_reply["result"]["password"] == canary
+
+    # a lookalike host must get url_mismatch and must not see a byte of the secret
+    evil_reply = dispatcher.dispatch(
+        _request("get_secret", {"entry_id": str(entry.id), "url": "https://evil.com/login"})
+    )
+    parsed = json.loads(evil_reply)
+    assert parsed["ok"] is False
+    assert parsed["error"] == {"code": "url_mismatch"}
+    assert canary.encode() not in evil_reply
+
+    # updating a password for a non-matching URL is refused and changes nothing
+    update_reply = json.loads(
+        dispatcher.dispatch(
+            _request(
+                "update_password",
+                {
+                    "entry_id": str(entry.id),
+                    "url": "https://evil.com/login",
+                    "new_password": "attacker-chosen",
+                },
+            )
+        )
+    )
+    assert update_reply["ok"] is False
+    assert update_reply["error"] == {"code": "url_mismatch"}
+    assert weak_session.get(entry.id).password.reveal() == canary
+
+
+def test_i5_locked_vault_answers_only_locked(weak_session: VaultSession) -> None:
+    canary = "CANARY-bridge-locked-91b4"
+    weak_session.add(make_login(password=SecretStr(canary)))
+    weak_session.close()
+    dispatcher = _dispatcher(weak_session)
+
+    payloads = {
+        "get_logins": {"url": "https://example.com"},
+        "get_secret": {"entry_id": str(uuid.uuid4()), "url": "https://example.com"},
+        "save_login": {
+            "url": "https://example.com",
+            "username": "u",
+            "password": canary,
+            "title": "t",
+        },
+        "update_password": {
+            "entry_id": str(uuid.uuid4()),
+            "url": "https://example.com",
+            "new_password": canary,
+        },
+    }
+    for kind in VAULT_TYPES:
+        reply = json.loads(dispatcher.dispatch(_request(kind, payloads[kind])))
+        assert reply == {"v": 1, "id": "req-1", "ok": False, "error": {"code": "locked"}}, kind

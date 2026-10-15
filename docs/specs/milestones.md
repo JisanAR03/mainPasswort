@@ -1,6 +1,6 @@
 # Milestones
 
-> Source: design pack v0.1, sections 10–12. Status: **G0 passed 2026-10-15; M0–M2 built and
+> Source: design pack v0.1, sections 10–12. Status: **G0 passed 2026-10-15; M0–M3 built and
 > self-reviewed 2026-10-15 — owner checks pending at G1 and G2.**
 
 Seven milestones, M0 to M6. Each is split into tasks small enough for one AI session, and each
@@ -28,9 +28,9 @@ left D2 (license, Q6) and Q7 (first importer) open. See [docs/adr/](../adr/).
 
 | When | Milestones |
 | --- | --- |
-| Now | M2 desktop app (M0 and M1 built, G1 sign-off pending; M2 built, G2 review pending) |
-| Next | M3 bridge and native host (after G2 sign-off) |
-| Later | M4 browser extension, M5 Google Drive sync, M6 merge, hardening and release |
+| Now | M3 bridge and native host (M0–M2 merged; M3 self-reviewed, merge pending; G1/G2 sign-off pending) |
+| Next | M4 browser extension |
+| Later | M5 Google Drive sync, M6 merge, hardening and release |
 
 Dates stay open until M0 shows how many task cards get finished in a week.
 
@@ -133,12 +133,12 @@ Tasks:
 
 Done when:
 
-- [ ] Fuzz tests (Hypothesis) send malformed, oversized and unknown messages; every one gets
+- [x] Fuzz tests (Hypothesis) send malformed, oversized and unknown messages; every one gets
       an error reply, and none crash the app
-- [ ] A locked vault answers everything with `locked` (I5)
-- [ ] A password is never returned for a non-matching URL (I4)
-- [ ] Requests without a valid pairing key are refused
-- [ ] A subprocess test speaks real native-messaging framing to the host
+- [x] A locked vault answers everything with `locked` (I5)
+- [x] A password is never returned for a non-matching URL (I4)
+- [x] Requests without a valid pairing key are refused
+- [x] A subprocess test speaks real native-messaging framing to the host
 
 ## M4: Browser extension
 
