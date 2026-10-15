@@ -1,0 +1,67 @@
+# --- Specification PDF: kept local until the owner approves publishing it ---
+/Personal Password Manager*.pdf
+
+# --- Secrets and environment ---
+.env
+.env.*
+!.env.example
+client_secret*.json
+credentials*.json
+token*.json
+# Private keys and certificates (includes the browser extension's signing key)
+*.pem
+*.key
+*.keyx
+*.p12
+*.pfx
+
+# --- Vaults, local app data, backups and exports ---
+# No vault file is ever committed. If test fixtures are needed later (M1),
+# add a narrow exception for the fixtures folder only.
+*.kdbx
+*.kdbx.*
+*.kdb
+*.tmp
+# Throwaway dev data folder (PV_DATA_DIR) and app data folder names
+.pv-data/
+PersonalVault/
+backups/
+conflicts/
+incoming/
+# Exports: CSV exports contain plaintext passwords
+exports/
+*.csv
+# Logs
+logs/
+*.log
+
+# --- Python / uv ---
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Browser extension packaging and end-to-end test output ---
+*.crx
+test-results/
+playwright-report/
+
+# --- Editors and operating systems ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Claude Code personal settings ---
+.claude/settings.local.json
