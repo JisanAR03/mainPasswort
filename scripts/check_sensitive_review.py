@@ -32,6 +32,21 @@ SENSITIVE_FILES = {
     "extension/inline.js",
     "extension/menu.js",
     "extension/prompt.js",
+    # extension-only mode (EXT-00): the vault, the key, Drive and the token
+    "extension/engine.js",
+    "extension/local.js",
+    "extension/sync.js",
+    "extension/decide.js",
+    "extension/drive.js",
+    "extension/oauth.js",
+    "extension/matching.js",
+    "extension/generator.js",
+    "extension/vault.js",
+    "extension/config.js",
+    "extension/manifest.json",
+    "extension/vendor/kdbxweb.js",
+    "extension/vendor/hash-wasm-argon2.umd.min.js",
+    "extension/vendor/hash-wasm-md5.umd.min.js",
 }
 
 TRAILER = "Security-Reviewed-By:"

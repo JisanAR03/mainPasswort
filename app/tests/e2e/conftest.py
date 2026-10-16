@@ -30,6 +30,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from fake_google import FakeGoogle
 from fixtures.weak_vault import WEAK_PASSWORD, build_weak_vault, make_login
 from personal_vault.bridge.pairing import PAIRING_ENTRY
 from personal_vault.core.models import SecretStr
@@ -223,19 +224,29 @@ def _launch(playwright: Playwright, profile: Path, extension: Path) -> BrowserCo
 
 
 @pytest.fixture(scope="session")
+def playwright_instance() -> Iterator[Playwright]:
+    """One Playwright for the run: the sync API allows one per thread, and the
+    desktop-mode and extension-only browsers both need it."""
+    with sync_playwright() as playwright:
+        yield playwright
+
+
+@pytest.fixture(scope="session")
 def browser(
-    test_extension: Path, host_socket: str, chromium_profile: Path
+    playwright_instance: Playwright,
+    test_extension: Path,
+    host_socket: str,
+    chromium_profile: Path,
 ) -> Iterator[BrowserContext]:
     """One headless browser for the whole e2e run, extension loaded and the
     pairing key already in extension storage."""
-    with sync_playwright() as playwright:
-        context = _launch(playwright, chromium_profile, test_extension)
-        seed = context.new_page()
-        seed.goto(POPUP_URL)
-        seed.evaluate("(key) => chrome.storage.local.set({ pairing_key: key })", PAIRING_KEY)
-        seed.close()
-        yield context
-        context.close()
+    context = _launch(playwright_instance, chromium_profile, test_extension)
+    seed = context.new_page()
+    seed.goto(POPUP_URL)
+    seed.evaluate("(key) => chrome.storage.local.set({ pairing_key: key })", PAIRING_KEY)
+    seed.close()
+    yield context
+    context.close()
 
 
 @pytest.fixture(scope="session")
@@ -395,3 +406,209 @@ def bridge_factory(
 @pytest.fixture
 def bridge(bridge_factory: Callable[..., Bridge]) -> Bridge:
     return bridge_factory()
+
+
+# --- extension-only mode -----------------------------------------------------------
+#
+# A second browser, with a copy of the extension that (1) connects to a native
+# host name nobody registers, so no desktop app can answer even by accident,
+# (2) uses the fake Google in fake_google.py, and (3) weak KDF settings and
+# short timers — config.js is the one file the copy rewrites, the way weak KDF
+# settings exist only in test fixtures. test_extension_basics asserts the
+# shipped values.
+
+EXT_ABSENT_HOST = "com.personalvault.absent"
+EXT_PASSWORD = "an extension-only test passphrase"
+
+
+def _rewrite(path: Path, replacements: dict[str, str]) -> None:
+    text = path.read_text(encoding="utf-8")
+    for old, new in replacements.items():
+        assert old in text, f"{path.name} no longer contains {old!r}"
+        text = text.replace(old, new)
+    path.write_text(text, encoding="utf-8")
+
+
+@pytest.fixture(scope="session")
+def fake_google() -> Iterator[FakeGoogle]:
+    google = FakeGoogle()
+    yield google
+    google.close()
+
+
+@pytest.fixture(scope="session")
+def ext_extension(tmp_path_factory: pytest.TempPathFactory, fake_google: FakeGoogle) -> Path:
+    target = tmp_path_factory.mktemp("ext-extension") / "extension"
+    shutil.copytree(
+        EXTENSION_DIR,
+        target,
+        ignore=shutil.ignore_patterns("key.pem", "native-host", "test-pages"),
+    )
+    _rewrite(target / "api.js", {f'"{HOST_NAME}"': f'"{EXT_ABSENT_HOST}"'})
+    base = fake_google.base
+    _rewrite(
+        target / "config.js",
+        {
+            "KDF_MEMORY_MIB = 128;": "KDF_MEMORY_MIB = 8;",
+            "KDF_MIN_MEMORY_MIB = 64;": "KDF_MIN_MEMORY_MIB = 8;",
+            "KDF_TARGET_MS = 1000;": "KDF_TARGET_MS = 1;",
+            "KDF_MIN_ITERATIONS = 2;": "KDF_MIN_ITERATIONS = 1;",
+            '"https://www.googleapis.com/drive/v3/files"': f'"{base}/drive/v3/files"',
+            '"https://www.googleapis.com/upload/drive/v3/files"': f'"{base}/upload/drive/v3/files"',
+            '"https://www.googleapis.com/drive/v3/about"': f'"{base}/drive/v3/about"',
+            '"https://accounts.google.com/o/oauth2/v2/auth"': f'"{base}/auth"',
+            "UPLOAD_QUIET_MS = 10 * 1000;": "UPLOAD_QUIET_MS = 300;",
+            "BACKOFF_SECONDS = [30, 60, 120, 240, 480, 960, 1800];": (
+                "BACKOFF_SECONDS = [1, 1, 2, 2, 2, 2, 2];"
+            ),
+        },
+    )
+    return target
+
+
+@pytest.fixture(scope="session")
+def ext_profile_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return tmp_path_factory.mktemp("ext-profile")
+
+
+def _seed_extension_mode(context: BrowserContext) -> None:
+    seed = context.new_page()
+    seed.goto(POPUP_URL)
+    seed.evaluate(
+        "() => chrome.storage.local.set({"
+        "  mode: 'extension', settings: { googleClientId: 'fake-client-id' }"
+        "})"
+    )
+    seed.close()
+
+
+@pytest.fixture(scope="session")
+def ext_browser(
+    playwright_instance: Playwright, ext_extension: Path, ext_profile_dir: Path
+) -> Iterator[BrowserContext]:
+    context = _launch(playwright_instance, ext_profile_dir, ext_extension)
+    _seed_extension_mode(context)
+    yield context
+    context.close()
+
+
+_DUMP_STORAGE = """async () => {
+  const local = await chrome.storage.local.get(null);
+  const session = await chrome.storage.session.get(null);
+  const db = await new Promise((ok, no) => {
+    const r = indexedDB.open('personal-vault');
+    r.onsuccess = () => ok(r.result);
+    r.onerror = no;
+  });
+  const rows = {};
+  for (const name of db.objectStoreNames) {
+    rows[name] = await new Promise((ok) => {
+      const r = db.transaction(name).objectStore(name).getAll();
+      r.onsuccess = () => ok(r.result);
+    });
+  }
+  db.close();
+  const text = JSON.stringify({ local, session, rows }, (k, v) =>
+    v instanceof ArrayBuffer ? `<${v.byteLength} encrypted bytes>` : v);
+  const bytes = [];
+  for (const list of Object.values(rows)) {
+    for (const row of list) {
+      if (row && row.bytes instanceof ArrayBuffer) {
+        bytes.push(new TextDecoder('latin1').decode(row.bytes));
+      }
+    }
+  }
+  return text + '\\n' + bytes.join('\\n');
+}"""
+
+_RESET = """async () => {
+  await chrome.runtime.sendMessage({ type: 'ext_lock', args: {} });
+  const docs = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+  if (docs.length) await chrome.offscreen.closeDocument();
+  await chrome.storage.session.clear();
+  await chrome.storage.local.clear();
+  await chrome.storage.local.set({
+    mode: 'extension', settings: { googleClientId: 'fake-client-id' }
+  });
+  await new Promise((ok, no) => {
+    const r = indexedDB.deleteDatabase('personal-vault');
+    r.onsuccess = ok;
+    r.onerror = no;
+    r.onblocked = ok;
+  });
+  for (const alarm of await chrome.alarms.getAll()) await chrome.alarms.clear(alarm.name);
+}"""
+
+
+class Ext:
+    """Drives extension-only mode the way its own pages do."""
+
+    def __init__(self, browser: BrowserContext, control: Page, google: FakeGoogle) -> None:
+        self.browser = browser
+        self.control = control
+        self.google = google
+
+    def call(self, type_: str, args: dict[str, object] | None = None) -> dict:
+        return self.control.evaluate(
+            "([type, args]) => chrome.runtime.sendMessage({ type, args })", [type_, args or {}]
+        )
+
+    def ok(self, type_: str, args: dict[str, object] | None = None) -> dict:
+        reply = self.call(type_, args)
+        assert reply.get("ok"), f"{type_} failed: {reply.get('error')}"
+        return reply.get("result") or {}
+
+    def state(self) -> dict:
+        return self.ok("ext_state")
+
+    def create_profile(self, name: str, password: str = EXT_PASSWORD) -> str:
+        result = self.ok("ext_create_profile", {"name": name, "password": password})
+        return str(result["profileId"])
+
+    def add_login(self, **fields: object) -> str:
+        entry = {
+            "title": "Example",
+            "username": "user@example.com",
+            "password": "an example password",
+            "urls": [],
+            "notes": "",
+            "tags": [],
+            "match_subdomains": False,
+            **fields,
+        }
+        return str(self.ok("ext_save_entry", {"entry": entry})["id"])
+
+    def sync_status(self, profile_id: str) -> dict:
+        return self.state()["statuses"].get(profile_id) or {}
+
+    def wait_status(self, profile_id: str, wanted: set[str], timeout_ms: int = 60_000) -> dict:
+        waited = 0
+        status: dict = {}
+        while waited <= timeout_ms:
+            status = self.sync_status(profile_id)
+            if status.get("state") in wanted:
+                return status
+            self.control.wait_for_timeout(250)
+            waited += 250
+        raise AssertionError(f"status never became {wanted}; last: {status}")
+
+    def dump_storage(self) -> str:
+        """Everything in extension storage and IndexedDB as text to search for
+        canaries — the vault files included, as raw bytes."""
+        return str(self.control.evaluate(_DUMP_STORAGE))
+
+
+@pytest.fixture
+def ext(ext_browser: BrowserContext, fake_google: FakeGoogle) -> Iterator[Ext]:
+    """A clean extension-only state for each test: no profiles, no vaults, no
+    sync state, nothing unlocked, an empty fake Drive."""
+    fake_google.reset()
+    control = ext_browser.new_page()
+    control.goto(POPUP_URL)
+    control.evaluate(_RESET)
+    before = {id(page) for page in ext_browser.pages}
+    yield Ext(ext_browser, control, fake_google)
+    for page in ext_browser.pages:
+        if id(page) not in before:
+            page.close()
+    control.close()

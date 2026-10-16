@@ -28,6 +28,20 @@ and no outside security review has been done. Each milestone below has a card in
   the hardening audit (dependencies, browser permissions, logs, temp files, crash reports),
   the known-limitations page, and the PyInstaller build with its install and update guide.
 
+- Extension-only mode (2026-10-17, EXT-00; proposed ADR-012 not yet accepted): the browser
+  extension can be the whole product. Vaults live in the browser (KDBX 4 written by the
+  vendored kdbxweb 2.1.1 with Argon2id from hash-wasm 4.12.0, in an offscreen document),
+  several profiles each with its own master password and Google account, unlock from the
+  popup or the new vault page, a 6-hour unlock kept only in `chrome.storage.session`
+  (SHA-256 of the password, never the password), Lock button and Alt+Shift+L, optional lock
+  with the screen. Google Drive sync from the extension with the desktop's scope, folder,
+  file name and `appProperties`, driven by a port of `decide()` that the e2e suite proves
+  equal to the Python one on all 11,520 inputs; every failure has a status (offline,
+  sign-in needs renewing, Drive full, conflict, file missing) with the last successful upload
+  and whether the latest change is only local. A vault the desktop app syncs can be opened
+  from Drive and keeps its profile id. New permissions: `offscreen`, `alarms`, `identity`,
+  optional `idle`; CSP allows WebAssembly. Desktop mode is unchanged and still the default.
+
 ### Security
 
 - M6: the encrypted KDBX export no longer carries the hidden `.app` group, so an export of a

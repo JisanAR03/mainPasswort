@@ -80,10 +80,23 @@ async function refresh() {
   show("pair-code", false);
   show("pair-hint", false);
   show("insecure", false);
+  show("ext-setup", false);
+  show("ext-unlock", false);
+  show("ext-sync", false);
+  show("open-vault", false);
   matches = [];
   renderMatches();
 
   const reply = await send("status");
+  if (reply.ok && reply.result.mode === "extension") {
+    show("open-vault", true);
+    if (reply.result.state === "locked") {
+      show("lock", false);
+      await renderExtensionLocked();
+      return;
+    }
+    await renderExtensionSync();
+  }
   if (!reply.ok) {
     const code = reply.error ? reply.error.code : "unknown";
     if (code === "app_not_running") {
@@ -125,6 +138,62 @@ $("unlock").addEventListener("click", async () => {
   await send("unlock");
   setStatus("Bringing the desktop window forward…");
 });
+
+// --- extension-only mode: unlock here, see the sync status -----------------------
+
+async function renderExtensionLocked() {
+  const reply = await send("ext_state", { args: {} });
+  if (!reply.ok) return setStatus("Could not read the vault list.");
+  const { profiles, lastProfileId } = reply.result;
+  if (profiles.length === 0) {
+    setStatus("No vault in this browser yet.");
+    show("ext-setup", true);
+    return;
+  }
+  const select = $("ext-profile");
+  select.replaceChildren(
+    ...profiles.map((p) => Object.assign(document.createElement("option"), { value: p.id, textContent: p.name })),
+  );
+  if (profiles.some((p) => p.id === lastProfileId)) select.value = lastProfileId;
+  setStatus("Locked.");
+  show("ext-unlock", true);
+  $("ext-password").focus();
+}
+
+async function renderExtensionSync() {
+  const reply = await send("ext_state", { args: {} });
+  if (!reply.ok || !reply.result.unlocked) return;
+  const id = reply.result.unlocked.profileId;
+  const status = reply.result.statuses[id];
+  const profile = reply.result.profiles.find((p) => p.id === id);
+  let text = status
+    ? status.message
+    : profile && profile.googleEmail
+      ? "Not synced yet."
+      : "Only on this computer (Google Drive not connected).";
+  if (status && status.localOnly && status.state !== "off") text += " Latest change: only on this computer.";
+  $("ext-sync").textContent = text;
+  show("ext-sync", true);
+}
+
+$("ext-unlock").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("ext-unlock-button").disabled = true;
+  setStatus("Unlocking…");
+  const reply = await send("ext_unlock", {
+    args: { profileId: $("ext-profile").value, password: $("ext-password").value },
+  });
+  $("ext-password").value = "";
+  $("ext-unlock-button").disabled = false;
+  if (reply.ok) await refresh();
+  else if (reply.error && reply.error.code === "bad_password") setStatus("Wrong master password.");
+  else setStatus(`Could not unlock: ${reply.error ? reply.error.code : "unknown"}`);
+});
+
+const openVault = (hash = "") => chrome.tabs.create({ url: chrome.runtime.getURL(`vault.html${hash}`) });
+$("ext-create").addEventListener("click", () => openVault());
+$("open-vault").addEventListener("click", () => openVault());
+$("use-extension").addEventListener("click", () => openVault());
 
 $("lock").addEventListener("click", async () => {
   await send("lock");

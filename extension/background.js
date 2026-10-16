@@ -12,9 +12,18 @@
 //   prompt_open, login_submitted, username_submitted — none of them is ever
 //   answered with a title, a username or a password;
 // - the menu and prompt frames (menu.html, prompt.html) inside a tab: their
-//   own requests, each tied to a one-time token handed out for that tab.
+//   own requests, each tied to a one-time token handed out for that tab;
+// - the vault page (vault.html) and the popup, for extension-only mode's
+//   profiles, entries, settings and sync (ext_* messages);
+// - the offscreen vault engine (offscreen.html), only to say the network is back.
+//
+// Two modes (ADR-012): "desktop" sends every vault request to the desktop app
+// over native messaging, as before; "extension" answers it from the vault the
+// extension holds itself (local.js, engine.js). vaultRequest() is the switch.
 import { browserName, nativeRequest, newPairingKey, store } from "./api.js";
 import { fillLogin } from "./fill.js";
+import * as local from "./local.js";
+import * as sync from "./sync.js";
 
 const SAVE_TTL_MS = 2 * 60 * 1000;
 const USERNAME_STEP_TTL_MS = 5 * 60 * 1000;
@@ -30,6 +39,12 @@ const MENU_VISIBLE_ROWS = 5;
 const LEGACY_DETECT_ID = "detect-submits";
 
 const fail = (code) => ({ ok: false, error: { code } });
+
+async function vaultRequest(type, payload) {
+  return (await local.mode()) === "extension"
+    ? local.localRequest(type, payload)
+    : nativeRequest(type, payload);
+}
 const pageUrl = (name) => chrome.runtime.getURL(name);
 
 // Before the content scripts were declared in the manifest, the detector was
@@ -93,7 +108,7 @@ async function targetTab() {
 
 // The vault's answer for one page URL: its matches, or why there are none.
 async function loginsFor(url) {
-  const reply = await nativeRequest("get_logins", { url });
+  const reply = await vaultRequest("get_logins", { url });
   if (reply.ok) return { state: "matches", logins: reply.result.logins };
   const code = reply.error ? reply.error.code : "internal";
   if (code === "no_match") return { state: "none", logins: [] };
@@ -107,7 +122,7 @@ async function loginsFor(url) {
 // only in that exact document, so a navigation since the menu opened means no
 // fill rather than a fill into whatever page loaded since.
 async function fillInto(tabId, documentId, entryId, url) {
-  const reply = await nativeRequest("get_secret", { entry_id: entryId, url });
+  const reply = await vaultRequest("get_secret", { entry_id: entryId, url });
   if (!reply.ok) return reply;
   const { username, password } = reply.result;
   const target = documentId ? { tabId, documentIds: [documentId] } : { tabId, frameIds: [0] };
@@ -181,7 +196,7 @@ async function handleMenu(message, sender) {
       return reply;
     }
     case "menu_unlock":
-      return nativeRequest("show_unlock", {});
+      return vaultRequest("show_unlock", {});
     case "menu_dismiss":
       await closeMenu(tabId);
       return { ok: true };
@@ -227,7 +242,7 @@ async function classify(candidate) {
   const wanted = candidate.username.trim().toLowerCase();
   const account = found.logins.find((login) => login.username.trim().toLowerCase() === wanted);
   if (!account) return { kind: "save", locked: false };
-  const secret = await nativeRequest("get_secret", { entry_id: account.id, url: candidate.url });
+  const secret = await vaultRequest("get_secret", { entry_id: account.id, url: candidate.url });
   if (secret.ok && secret.result.password === candidate.password) return { kind: "same" };
   return { kind: "update", locked: false, entryId: account.id, title: account.title };
 }
@@ -300,7 +315,7 @@ async function resolveCandidate(candidate, action) {
     const verdict = await classify(candidate);
     if (verdict.kind === "none") return fail("app_not_running");
     if (verdict.locked) {
-      await nativeRequest("show_unlock", {});
+      await vaultRequest("show_unlock", {});
       return fail("locked");
     }
     if (verdict.kind === "same") {
@@ -315,19 +330,19 @@ async function resolveCandidate(candidate, action) {
   const host = new URL(current.origin).host;
   const reply =
     action === "save"
-      ? await nativeRequest("save_login", {
+      ? await vaultRequest("save_login", {
           url: current.url,
           username: current.username,
           password: current.password,
           title: host,
         })
-      : await nativeRequest("update_password", {
+      : await vaultRequest("update_password", {
           entry_id: current.entryId,
           url: current.url,
           new_password: current.password,
         });
   if (!reply.ok) {
-    if (reply.error && reply.error.code === "locked") await nativeRequest("show_unlock", {});
+    if (reply.error && reply.error.code === "locked") await vaultRequest("show_unlock", {});
     return reply;
   }
   await clearCandidate(current, PROMPT_CLOSE_DELAY_MS);
@@ -395,7 +410,7 @@ async function handlePrompt(message, sender) {
 async function handlePopup(message) {
   switch (message.type) {
     case "status":
-      return nativeRequest("hello", {
+      return vaultRequest("hello", {
         extension_version: chrome.runtime.getManifest().version,
       });
 
@@ -416,7 +431,7 @@ async function handlePopup(message) {
     case "get_logins": {
       const tab = await targetTab();
       if (!tab) return fail("no_tab");
-      const reply = await nativeRequest("get_logins", { url: tab.url });
+      const reply = await vaultRequest("get_logins", { url: tab.url });
       return { ...reply, tab_url: tab.url };
     }
 
@@ -430,13 +445,13 @@ async function handlePopup(message) {
     }
 
     case "lock":
-      return nativeRequest("lock", {});
+      return vaultRequest("lock", {});
 
     case "unlock":
-      return nativeRequest("show_unlock", {});
+      return vaultRequest("show_unlock", {});
 
     case "save_login":
-      return nativeRequest("save_login", {
+      return vaultRequest("save_login", {
         url: message.url,
         username: message.username,
         password: message.password,
@@ -444,7 +459,7 @@ async function handlePopup(message) {
       });
 
     case "generate":
-      return nativeRequest("generate_password", {});
+      return vaultRequest("generate_password", {});
 
     case "pending_save": {
       const candidate = await pendingCandidate();
@@ -487,11 +502,167 @@ const PAGE_TYPES = new Set([
   "username_submitted",
 ]);
 const MENU_TYPES = new Set(["menu_data", "menu_fill", "menu_unlock", "menu_dismiss"]);
+const EXT_TYPES = new Set([
+  "ext_state",
+  "ext_set_mode",
+  "ext_create_profile",
+  "ext_rename_profile",
+  "ext_delete_profile",
+  "ext_unlock",
+  "ext_lock",
+  "ext_list",
+  "ext_get",
+  "ext_save_entry",
+  "ext_delete_entry",
+  "ext_generate",
+  "ext_export",
+  "ext_settings",
+  "ext_connect",
+  "ext_disconnect",
+  "ext_sync_now",
+  "ext_choose",
+  "ext_drive_list",
+  "ext_drive_open",
+]);
 const PROMPT_TYPES = new Set(["prompt_data", "prompt_action"]);
+
+// --- extension-only mode: the vault page and the popup ----------------------------
+
+const IDLE_PERMISSION = { permissions: ["idle"] };
+
+async function extState() {
+  const profiles = await local.profiles();
+  const record = await local.unlockedRecord();
+  const { settings = {}, last_profile_id: lastProfileId } = await chrome.storage.local.get([
+    "settings",
+    "last_profile_id",
+  ]);
+  const statuses = {};
+  for (const profile of profiles) statuses[profile.id] = await sync.status(profile.id);
+  return {
+    ok: true,
+    result: {
+      mode: await local.mode(),
+      // names and linked accounts only — never anything from inside a vault
+      profiles: profiles.map(({ id, name, googleEmail }) => ({ id, name, googleEmail })),
+      unlocked: record ? { profileId: record.profileId, expiresAt: record.expiresAt } : null,
+      lastProfileId: lastProfileId || null,
+      settings: {
+        googleClientId: settings.googleClientId || "",
+        lockOnScreenLock: settings.lockOnScreenLock === true,
+      },
+      redirectUrl: chrome.identity.getRedirectURL(),
+      statuses,
+    },
+  };
+}
+
+async function unlockedProfileId() {
+  const record = await local.unlockedRecord();
+  return record ? record.profileId : null;
+}
+
+async function handleExt(message) {
+  const args = message.args || {};
+  switch (message.type) {
+    case "ext_state":
+      return extState();
+    case "ext_set_mode":
+      return local.setMode(args.mode);
+    case "ext_create_profile":
+      return local.createProfile(args.name, args.password);
+    case "ext_rename_profile":
+      return local.renameProfile(args.profileId, args.name);
+    case "ext_delete_profile":
+      return local.deleteProfile(args.profileId, args.confirmName);
+    case "ext_unlock":
+      return local.unlock(args.profileId, args.password);
+    case "ext_lock":
+      await local.lock();
+      return { ok: true, result: {} };
+    case "ext_list":
+      return local.vaultOp("list", { query: args.query || "" });
+    case "ext_get":
+      return local.vaultOp("get", { entryId: args.entryId });
+    case "ext_save_entry":
+      return local.vaultOp(args.entry && args.entry.id ? "edit" : "add", { entry: args.entry });
+    case "ext_delete_entry":
+      return local.vaultOp("delete", { entryId: args.entryId });
+    case "ext_generate":
+      return local.localRequest("generate_password", { length: args.length });
+    case "ext_export":
+      return local.vaultOp("export", {});
+    case "ext_settings": {
+      const { settings = {} } = await store.get("settings");
+      const next = { ...settings };
+      if (typeof args.googleClientId === "string") next.googleClientId = args.googleClientId.trim();
+      if (typeof args.lockOnScreenLock === "boolean") next.lockOnScreenLock = args.lockOnScreenLock;
+      await store.set({ settings: next });
+      await watchIdle();
+      return { ok: true, result: {} };
+    }
+    case "ext_connect": {
+      const profileId = await unlockedProfileId();
+      return profileId ? sync.connect(profileId) : fail("locked");
+    }
+    case "ext_disconnect": {
+      const profileId = await unlockedProfileId();
+      return profileId ? sync.disconnect(profileId) : fail("locked");
+    }
+    case "ext_sync_now": {
+      const profileId = await unlockedProfileId();
+      return profileId ? { ok: true, result: await sync.runSync(profileId) } : fail("locked");
+    }
+    case "ext_choose": {
+      const profileId = await unlockedProfileId();
+      return profileId ? sync.choose(profileId, args.choice) : fail("locked");
+    }
+    case "ext_drive_list":
+      return sync.listDriveVaults();
+    case "ext_drive_open":
+      return sync.openFromDrive(args.fileId, args.name, args.password);
+    default:
+      return fail("bad_request");
+  }
+}
+
+// Lock when the OS locks the screen — only if the owner turned it on and
+// granted the optional "idle" permission.
+function onIdleState(state) {
+  if (state === "locked") vaultRequest("lock", {});
+}
+
+async function watchIdle() {
+  if (!chrome.idle) return;
+  const { settings = {} } = await store.get("settings");
+  const wanted = settings.lockOnScreenLock === true;
+  const granted = await chrome.permissions.contains(IDLE_PERMISSION);
+  chrome.idle.onStateChanged.removeListener(onIdleState);
+  if (wanted && granted) chrome.idle.onStateChanged.addListener(onIdleState);
+}
+watchIdle();
+chrome.permissions.onAdded.addListener(watchIdle);
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "unlock-expiry") local.lock();
+  else sync.handleAlarm(alarm.name);
+});
+
+// The lock shortcut works in both modes.
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "lock-vault") vaultRequest("lock", {});
+});
 
 async function route(message, sender) {
   if (!message || typeof message.type !== "string") return fail("bad_request");
   const { type } = message;
+  if (EXT_TYPES.has(type) && (fromExtensionPage(sender, "vault.html") || fromExtensionPage(sender, "popup.html"))) {
+    return handleExt(message);
+  }
+  if (type === "engine_online" && fromExtensionPage(sender, "offscreen.html")) {
+    await sync.syncUnlocked();
+    return { ok: true };
+  }
   if (POPUP_TYPES.has(type) && fromExtensionPage(sender, "popup.html")) return handlePopup(message);
   if (PAGE_TYPES.has(type) && fromPage(sender)) return handlePage(message, sender);
   if (MENU_TYPES.has(type) && sender.tab && fromExtensionPage(sender, "menu.html")) {
@@ -504,6 +675,7 @@ async function route(message, sender) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.target === "engine") return false; // for the offscreen engine, not us
   route(message, sender).then(sendResponse, () => sendResponse(fail("internal")));
   return true; // keep the channel open for the async reply
 });

@@ -34,12 +34,24 @@ def test_shipped_manifest_asks_only_for_what_the_page_features_need() -> None:
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     web = ["http://*/*", "https://*/*"]
     assert manifest["manifest_version"] == 3
+    # offscreen, alarms and identity are extension-only mode's (EXT-00, approved
+    # by the owner): the vault engine's document, the timers that outlive the
+    # service worker, and Google sign-in
     assert sorted(manifest["permissions"]) == [
         "activeTab",
+        "alarms",
+        "identity",
         "nativeMessaging",
+        "offscreen",
         "scripting",
         "storage",
     ]
+    assert manifest["optional_permissions"] == ["idle"]  # asked for only on a click
+    # WebAssembly for Argon2, nothing more: no eval, no remote scripts
+    assert manifest["content_security_policy"] == {
+        "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    }
+    assert set(manifest["commands"]) == {"lock-vault"}
     assert manifest["host_permissions"] == web
     assert "optional_host_permissions" not in manifest
     assert manifest["content_scripts"] == [
@@ -54,6 +66,29 @@ def test_shipped_manifest_asks_only_for_what_the_page_features_need() -> None:
         {"resources": ["menu.html", "prompt.html"], "matches": web}
     ]
     assert "key" in manifest, "the ID must stay pinned for the native-host registration"
+
+
+def test_shipped_config_is_the_real_one() -> None:
+    """config.js is what the e2e copy rewrites (weak KDF, fake Google, short
+    timers); the file that ships must hold the real values."""
+    config = (MANIFEST_PATH.parent / "config.js").read_text(encoding="utf-8")
+    for line in (
+        "export const UNLOCK_HOURS = 6;",
+        "export const KDF_MEMORY_MIB = 128;",
+        "export const KDF_MIN_MEMORY_MIB = 64;",
+        "export const KDF_PARALLELISM = 2;",
+        "export const KDF_TARGET_MS = 1000;",
+        "export const KDF_MIN_ITERATIONS = 2;",
+        'export const DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";',
+        'export const DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files";',
+        'export const DRIVE_ABOUT_URL = "https://www.googleapis.com/drive/v3/about";',
+        'export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";',
+        'export const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";',
+        "export const UPLOAD_QUIET_MS = 10 * 1000;",
+        "export const SYNC_INTERVAL_MINUTES = 60;",
+        "export const BACKOFF_SECONDS = [30, 60, 120, 240, 480, 960, 1800];",
+    ):
+        assert line in config, f"config.js does not ship {line!r}"
 
 
 def test_the_loaded_extension_has_the_pinned_id(control_page: Page) -> None:
