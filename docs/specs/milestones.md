@@ -1,7 +1,8 @@
 # Milestones
 
 > Source: design pack v0.1, sections 10–12. Status: **G0 passed 2026-10-15; M0–M3 built and
-> self-reviewed 2026-10-15 — owner checks pending at G1 and G2.**
+> self-reviewed 2026-10-15; M4 and M5 built and self-reviewed 2026-10-16 — owner checks
+> pending at G1, G2, G3 and G4.**
 
 Seven milestones, M0 to M6. Each is split into tasks small enough for one AI session, and each
 is closed by a gate that the owner signs off. A milestone is done only when every "Done when"
@@ -28,9 +29,8 @@ left D2 (license, Q6) and Q7 (first importer) open. See [docs/adr/](../adr/).
 
 | When | Milestones |
 | --- | --- |
-| Now | M3 bridge and native host (M0–M2 merged; M3 self-reviewed, merge pending; G1/G2 sign-off pending) |
-| Next | M4 browser extension |
-| Later | M5 Google Drive sync, M6 merge, hardening and release |
+| Now | M4 browser extension and M5 Drive sync (M0–M3 merged; both self-reviewed, PR open; G1/G2/G3/G4 sign-off pending) |
+| Next | M6 merge, hardening and release |
 
 Dates stay open until M0 shows how many task cards get finished in a week.
 
@@ -155,13 +155,13 @@ Tasks:
 
 Done when (Playwright, with the extension loaded, against pages in `extension/test-pages/`):
 
-- [ ] A normal login page fills after one click and does not submit
-- [ ] A cross-origin iframe login form is never filled
-- [ ] Hidden, zero-size and transparent fields are never filled
-- [ ] A look-alike domain gets no suggestions
-- [ ] An https entry is refused on an http page
-- [ ] Navigating between listing and clicking aborts the fill
-- [ ] M4b: nothing is saved without a click in the popup
+- [x] A normal login page fills after one click and does not submit
+- [x] A cross-origin iframe login form is never filled
+- [x] Hidden, zero-size and transparent fields are never filled
+- [x] A look-alike domain gets no suggestions
+- [x] An https entry is refused on an http page
+- [x] Navigating between listing and clicking aborts the fill
+- [x] M4b: nothing is saved without a click in the popup
 
 ## M5: Google Drive sync
 
@@ -176,14 +176,22 @@ Tasks:
 - **M5-05** Conflict banner and the three resolution choices.
 - **M5-06** Sync status in the UI; `docs/setup-google-drive.md`.
 
-Done when:
+Done when (every line below is a test that ran; `app/tests/sync/` and `app/tests/security/`):
 
-- [ ] Every row of the decision table has a test
-- [ ] Offline edits upload after the network returns
-- [ ] A write injected between check and upload becomes a conflict, never an overwrite (I6)
-- [ ] A corrupted download is never adopted (I7)
-- [ ] Uploaded bytes never contain the canary and always match a verified local file (I10)
-- [ ] A manual two-device test on a throwaway account passes
+- [x] Every row of the decision table has a test (`test_decide.py`)
+- [x] Offline edits upload after the network returns
+      (`test_an_offline_edit_uploads_itself_when_the_network_returns`)
+- [x] A write injected between check and upload becomes a conflict, never an overwrite (I6)
+      (`test_a_write_between_the_check_and_the_upload_is_a_conflict`,
+      `test_i6_a_sync_never_uploads_over_a_copy_it_has_not_seen`)
+- [x] A corrupted download is never adopted (I7)
+      (`test_a_download_that_does_not_decrypt_is_never_adopted`,
+      `test_i7_a_file_that_does_not_decrypt_is_never_adopted`)
+- [x] Uploaded bytes never contain the canary and always match a verified local file (I10)
+      (`test_i10_drive_receives_only_the_bytes_the_file_verified_to`)
+- [ ] A manual two-device test on a throwaway account passes — **G4, the owner's check**:
+      two devices (or one device and the Drive web app), a real edit on each, and the conflict
+      banner seen once. Not done yet, so sync stays off for real vaults.
 
 ## M6: Merge, hardening and release
 

@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -24,6 +27,23 @@ from personal_vault.core.transfer import export_csv as core_export_csv
 from personal_vault.core.transfer import import_csv as core_import_csv
 from personal_vault.core.transfer import import_kdbx as core_import_kdbx
 from personal_vault.core.vault import VaultSession, open_vault  # noqa: F401 (re-export)
+from personal_vault.sync.drive_client import DriveClient, HttpDriveClient
+from personal_vault.sync.engine import (
+    FIRST_LINK_ASK,
+    Status,
+    SyncEngine,
+    SyncResult,
+    SyncWorker,
+)
+from personal_vault.sync.errors import NotLinked, SyncError
+from personal_vault.sync.oauth import (
+    CLIENT_CONFIG_FILE,
+    DRIVE_SYNC_ENTRY,
+    GoogleAccount,
+    load_client_config,
+    refreshed_access_token,
+)
+from personal_vault.sync.oauth import connect as oauth_connect
 
 # Re-exported so ui/ can use these types without importing core/ directly.
 __all__ = [
@@ -41,13 +61,19 @@ __all__ = [
     "data_dir",
     "delete_login",
     "entry_history",
+    "connect_google",
+    "disconnect_google",
     "export_csv",
     "generate_password",
     "generator_defaults",
     "get_login",
+    "google_access_token",
+    "google_account",
+    "google_client_secret_path",
     "idle_lock_minutes",
     "import_csv",
     "import_kdbx",
+    "install_client_secret",
     "list_backups",
     "list_logins",
     "lock_on_sleep",
@@ -56,12 +82,19 @@ __all__ = [
     "profile_vault_dir",
     "profiles",
     "restore_backup",
+    "review_copy",
     "save_vault",
     "search_logins",
     "settings_readonly",
     "settings_values",
+    "sync_interval_minutes",
+    "SyncController",
+    "SyncReport",
+    "Status",
+    "SyncResult",
     "update_login",
     "update_settings",
+    "upload_quiet_seconds",
 ]
 
 
@@ -243,3 +276,319 @@ def import_csv(source: str | Path, session: VaultSession) -> int:
 def import_kdbx(source: str | Path, password: str, session: VaultSession) -> int:
     """Open a KDBX as untrusted input; entries land in a new group for review."""
     return core_import_kdbx(source, password, session)
+
+
+# --- Google Drive sync: sign-in and the token in the vault ------------------
+
+
+def google_client_secret_path() -> Path:
+    """The owner's own OAuth client: <data>/client_secret.json (git-ignored)."""
+    return data_dir() / CLIENT_CONFIG_FILE
+
+
+def google_account(session: VaultSession) -> GoogleAccount | None:
+    """The Drive account this profile is connected as, if any."""
+    token = session.get_app_value(DRIVE_SYNC_ENTRY)
+    if not token:
+        return None
+    return GoogleAccount(
+        refresh_token=SecretStr(token), email=session.get_app_username(DRIVE_SYNC_ENTRY)
+    )
+
+
+def save_google_account(session: VaultSession, account: GoogleAccount) -> None:
+    """Store the refresh token in the vault and save, so it never sits elsewhere."""
+    session.set_app_value(
+        DRIVE_SYNC_ENTRY, account.refresh_token.reveal(), username=account.email or ""
+    )
+    save_vault(session)
+
+
+def connect_google(session: VaultSession) -> GoogleAccount:
+    """Sign in with Google and store the token.
+
+    Blocking, and it opens the system browser: call it off the UI thread
+    (the sync worker, M5-05/M5-06).
+    """
+    config = load_client_config(google_client_secret_path())
+    account = oauth_connect(config, email_lookup=_drive_account_email)
+    save_google_account(session, account)
+    return account
+
+
+def disconnect_google(session: VaultSession) -> None:
+    """Forget the account: the entry goes, the rest of the vault stays."""
+    session.delete_app_entry(DRIVE_SYNC_ENTRY)
+    save_vault(session)
+
+
+def google_access_token(session: VaultSession) -> str:
+    """A fresh access token for this profile, or the error the UI shows."""
+    account = google_account(session)
+    if account is None:
+        raise NotLinked("this profile is not connected to Google Drive")
+    return refreshed_access_token(account, load_client_config(google_client_secret_path()))
+
+
+def _drive_account_email(access_token: str) -> str | None:
+    """The account's address, only to label the connection.
+
+    A failure here is not a failure to sign in: the token is already stored by
+    the time this runs, so the email may simply stay unknown.
+    """
+    try:
+        return HttpDriveClient(token=lambda: access_token).account_email()
+    except SyncError:
+        return None
+
+
+def sync_interval_minutes() -> int:
+    """How often an unlocked vault syncs, from settings.json (default 60)."""
+    return max(1, cast(int, _setting("sync_interval_minutes")))
+
+
+def upload_quiet_seconds() -> int:
+    """How long a save waits before it is uploaded, from settings.json (default 10)."""
+    return max(1, cast(int, _setting("upload_quiet_seconds")))
+
+
+def install_client_secret(source: str | Path) -> Path:
+    """Copy the owner's own OAuth client to <data>/client_secret.json.
+
+    The file is the owner's (docs/setup-google-drive.md): copied, never read
+    from wherever it was downloaded to, and never committed — the data folder
+    is outside the repository and the name is git-ignored.
+    """
+    source = Path(source)
+    load_client_config(source)  # refuse anything that is not a Desktop-app client
+    target = google_client_secret_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source.resolve() != target.resolve():
+        shutil.copyfile(source, target)
+    return target
+
+
+def vault_profile_id(session: VaultSession) -> str | None:
+    """Which profile a session's file belongs to: <data>/profiles/<id>/vault.kdbx.
+
+    None for a vault opened from anywhere else (tests, an import preview), which
+    is the UI's signal that there is no profile to sync.
+    """
+    folder = session.path.parent
+    if folder.parent.name != "profiles" or not folder.name:
+        return None
+    return folder.name
+
+
+def review_copy(session: VaultSession, path: str | Path) -> VaultSession:
+    """Open a file beside the vault read-only, with the master password in hand.
+
+    This is what "Open both" shows: the kept conflict copy, to read and copy
+    from by hand. It is never saved through.
+    """
+    return session.reopen(path)
+
+
+def reload_vault(session: VaultSession) -> VaultSession:
+    """Reopen the vault file: a sync replaced it with a newer copy from Drive."""
+    return session.reopen()
+
+
+@dataclass(frozen=True)
+class SyncReport:
+    """What the status line shows: one of the spec's states, and why."""
+
+    status: Status
+    message: str
+    retry_at: str | None = None
+    conflict: dict[str, object] | None = None
+    email: str | None = None
+    first_link: bool = False  # Drive already holds this profile's vault (ADR-010)
+
+
+class _AccessToken:
+    """The token the Drive client reads, and the refresh a 401 triggers.
+
+    The engine calls neither from the GUI thread, and neither ever raises
+    anything but a SyncError: a locked vault means "not connected right now",
+    which the engine reports and the status line shows as Sync off.
+    """
+
+    def __init__(self, session: VaultSession) -> None:
+        self._session = session
+        self._token: str | None = None
+
+    def current(self) -> str:
+        if self._token is None:
+            self._token = _fresh_token(self._session)
+        return self._token
+
+    def refresh(self) -> None:
+        self._token = _fresh_token(self._session)
+
+
+def _fresh_token(session: VaultSession) -> str:
+    try:
+        return google_access_token(session)
+    except VaultError as exc:
+        raise NotLinked("the vault is locked") from exc
+
+
+class SyncController:
+    """One profile's sync, as the UI works with it.
+
+    It owns the engine and its worker thread; every call here is safe from the
+    GUI thread except ``link``, which opens a browser and blocks (the caller
+    runs it on a thread of its own). Nothing here touches entry data: syncing
+    moves whole files.
+    """
+
+    def __init__(
+        self,
+        session: VaultSession,
+        *,
+        client_factory: Callable[[Callable[[], str]], DriveClient] | None = None,
+        interval_seconds: float | None = None,
+        save_delay_seconds: float | None = None,
+    ) -> None:
+        folder = session.path.parent  # <data>/profiles/<id>/
+        self._session = session
+        self.profile_id = folder.name
+        self._token = _AccessToken(session)
+        # resolved here, not as a default argument: tests replace the name
+        make_client = HttpDriveClient if client_factory is None else client_factory
+        self.engine = SyncEngine(
+            client=make_client(self._token.current),
+            vault_path=session.path,
+            backups_dir=folder / "backups",
+            sync_dir=folder / "sync",
+            profile_id=folder.name,
+            verify_decrypts=session.opens_with_this_password,
+            refresh_credentials=self._token.refresh,
+        )
+        self.worker = SyncWorker(
+            self.engine,
+            interval_seconds=(
+                interval_seconds if interval_seconds is not None else sync_interval_minutes() * 60.0
+            ),
+            save_delay_seconds=(
+                save_delay_seconds
+                if save_delay_seconds is not None
+                else upload_quiet_seconds() * 1.0
+            ),
+        )
+        self._running = False
+
+    # --- who this profile is ----------------------------------------------
+
+    def account(self) -> GoogleAccount | None:
+        """The Drive account this profile is connected as, if any."""
+        try:
+            return google_account(self._session)
+        except VaultError:
+            return None  # a vault that is closed is simply not connected any more
+
+    def linked(self) -> bool:
+        return self.account() is not None
+
+    @property
+    def running(self) -> bool:
+        return self._running
+
+    # --- the vault switched under us --------------------------------------
+
+    def reload(self) -> VaultSession:
+        """Reopen the vault (a sync adopted a newer copy) and follow it."""
+        self._session = reload_vault(self._session)
+        return self._session
+
+    def session(self) -> VaultSession:
+        """The session this controller follows, as of the last reload."""
+        return self._session
+
+    # --- start, stop, link, unlink ----------------------------------------
+
+    def start(self) -> None:
+        """Sync while unlocked: the unlock trigger. Does nothing if unlinked."""
+        if self._running or not self.linked():
+            return
+        self.worker.start()
+        self._running = True
+        self.worker.notify_unlocked()
+
+    def stop(self) -> None:
+        """Stop syncing (lock, or unlink). Safe to call twice."""
+        if self._running:
+            self.worker.stop()
+            self._running = False
+
+    def link(self) -> GoogleAccount:
+        """Sign in with Google and store the token. Blocking: run it off the GUI thread."""
+        return connect_google(self._session)
+
+    def unlink(self) -> None:
+        """Forget the account and stop syncing; the vault itself is untouched."""
+        self.stop()
+        disconnect_google(self._session)
+
+    # --- the triggers ------------------------------------------------------
+
+    def notify_saved(self) -> None:
+        if self._running:
+            self.worker.notify_saved()
+
+    def notify_online(self) -> None:
+        if self._running:
+            self.worker.notify_online()
+
+    def sync_now(self) -> None:
+        if self._running:
+            self.worker.sync_now()
+
+    # --- the owner's conflict choices (M5-05) ------------------------------
+
+    def keep_mine(self) -> SyncResult:
+        return self.engine.upload_local()
+
+    def take_theirs(self) -> SyncResult:
+        result = self.engine.adopt_remote()
+        if result.status is Status.SYNCED:
+            # adopting does not put their copy on Drive's head: ask for a run now
+            self.sync_now()
+        return result
+
+    # --- what the status line reads ----------------------------------------
+
+    def report(self) -> SyncReport:
+        """The state to show, from the link, the last run and state.json."""
+        account = self.account()
+        if account is None:
+            return SyncReport(Status.SYNC_OFF, "not connected to Google Drive")
+        email = account.email
+        state = self.engine.state()
+        if state is not None and state.conflict:
+            return SyncReport(
+                Status.CONFLICT,
+                "this vault and the copy on Drive both changed",
+                conflict=state.conflict,
+                email=email,
+            )
+        last = self.worker.last_result
+        if last is not None and last.status in {
+            Status.OFFLINE,
+            Status.RECONNECT,
+            Status.UNREADABLE,
+            Status.ATTENTION,
+        }:
+            return SyncReport(
+                last.status,
+                last.message,
+                retry_at=last.retry_at,
+                email=email,
+                first_link=last.message.startswith(FIRST_LINK_ASK),
+            )
+        if state is None:
+            return SyncReport(Status.WAITING, "waiting for the first sync", email=email)
+        if state.local_dirty:
+            return SyncReport(Status.WAITING, "a change here is not on Drive yet", email=email)
+        return SyncReport(Status.SYNCED, "everything is on Drive", email=email)

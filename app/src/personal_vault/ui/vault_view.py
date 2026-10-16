@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Mapping
 from datetime import UTC
 
 from PySide6.QtCore import Qt, Signal
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from personal_vault.services import (
     LoginEntry,
+    SyncController,
     VaultError,
     VaultSession,
     add_login,
@@ -36,9 +38,12 @@ from personal_vault.services import (
     save_vault,
     search_logins,
     update_login,
+    vault_profile_id,
 )
 from personal_vault.ui.backups_view import BackupsView
 from personal_vault.ui.entry_form import EntryFormDialog
+from personal_vault.ui.sync_banner import ConflictActions, SyncBanner, SyncOutcome
+from personal_vault.ui.sync_status import SyncStatusBar
 from personal_vault.ui.transfer_dialogs import ExportDialog, ImportDialog
 
 log = logging.getLogger("personal_vault.ui")
@@ -64,10 +69,24 @@ class VaultView(QWidget):
 
     locked = Signal()
     restored = Signal(object)  # a backup restore produced a new VaultSession
+    sync_resolved = Signal(object)  # a conflict was resolved: the sync layer's outcome
 
     def __init__(self, session: VaultSession) -> None:
         super().__init__()
         self._session = session
+        self._controller: SyncController | None = None
+        self.sync: SyncStatusBar | None = None
+        if vault_profile_id(session) is not None:  # a real profile vault may sync
+            self._controller = SyncController(session)
+            self.sync = SyncStatusBar(self._controller)
+            self.sync.conflict_ready.connect(self.set_conflict)
+            self.sync.sync_applied.connect(self._sync_resolved)
+            controller = self._controller
+            self.destroyed.connect(lambda *_: controller.stop())  # locking stops syncing
+            self._controller.start()  # the unlock trigger, if this profile is linked
+
+        self.banner = SyncBanner()
+        self.banner.resolved.connect(self._sync_resolved)
 
         self._search = QLineEdit()
         self._search.setPlaceholderText("Search title, username or notes")
@@ -108,10 +127,37 @@ class VaultView(QWidget):
             buttons.addWidget(button)
 
         layout = QVBoxLayout(self)
+        if self.sync is not None:
+            layout.addWidget(self.sync)
+        layout.addWidget(self.banner)
         layout.addWidget(self._search)
         layout.addWidget(self._list)
         layout.addLayout(buttons)
         self._refresh()
+
+    def set_conflict(self, conflict: Mapping[str, object] | None, actions: ConflictActions) -> None:
+        """Show or clear the conflict banner (the sync layer calls this)."""
+        if conflict is None:
+            self.banner.clear()
+        else:
+            self.banner.show_conflict(conflict, actions)
+
+    def _sync_resolved(self, outcome: object) -> None:
+        """A conflict is over: reload the list, and the vault if Drive's copy won."""
+        if self.sync is not None:
+            self.sync.refresh()
+        adopted = isinstance(outcome, SyncOutcome) and outcome.adopted
+        if adopted and self._controller is not None:
+            try:
+                self._session = self._controller.reload()
+            except VaultError as exc:
+                self._warn(f"The copy from Drive could not be opened: {exc}")
+                return
+            self._refresh()
+            self.restored.emit(self._session)  # the window reopens the vault
+        else:
+            self._refresh()
+        self.sync_resolved.emit(outcome)
 
     def _refresh(self) -> None:
         query = self._search.text().strip()
@@ -145,6 +191,8 @@ class VaultView(QWidget):
         except VaultError as exc:
             self._warn(f"The vault could not be saved: {exc}")
             return False
+        if self._controller is not None:
+            self._controller.notify_saved()  # sync.md: upload a moment after a save
         return True
 
     def _add_flow(self) -> None:

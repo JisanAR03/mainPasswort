@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import os
 import struct
@@ -163,6 +164,38 @@ def test_same_host_process_answers_a_second_request(qtbot: QtBot, running_server
         assert second["ok"] is True
     finally:
         _finish(proc)
+
+
+def test_the_host_reconnects_when_the_app_restarts(qtbot: QtBot) -> None:
+    """A request that never left the host side may be retried on a fresh
+    connection; one the app already answered is never resent (so a save can
+    only ever be applied once)."""
+    name = f"pv-host-test-{uuid.uuid4().hex}"
+    first = BridgeServer(Backend(), Pairing())
+    assert first.listen(name)
+    proc = _start_host(name)
+    try:
+        hello = json.loads(
+            _exchange_pumped(qtbot, proc, _request("hello", {"extension_version": "1.0"}))
+        )
+        assert hello["ok"] is True
+
+        first.close()  # the app quits, leaving the host's connection stale
+        second = BridgeServer(Backend(), Pairing())
+        assert second.listen(name)  # ... and comes back on the same socket
+        try:
+            again = json.loads(
+                _exchange_pumped(qtbot, proc, _request("hello", {"extension_version": "1.0"}))
+            )
+            assert again["ok"] is True, "the host must retry on a fresh connection"
+        finally:
+            second.close()
+    finally:
+        _finish(proc)
+    # the two servers hold Qt objects in a reference cycle: collect them here,
+    # where no event loop is running, not in the next test's loop
+    del first, second
+    gc.collect()
 
 
 def test_host_answers_app_not_running_without_a_server(qtbot: QtBot) -> None:

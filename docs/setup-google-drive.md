@@ -69,3 +69,90 @@ that day.
 Keep the throwaway account, the client secret and the token: M5 uses the same account and
 client for the real sync spike and the G4 gate. If the account is ever compromised, it only
 ever held encrypted vault files with `drive.file` scope, plus this test data.
+
+---
+
+# Using sync in the app
+
+Everything above produced the throwaway account and `client_secret.json`. What follows is what
+the owner does in the app, and what each line it prints means.
+
+## 7. Give the app the client file
+
+The app looks for `<data folder>/client_secret.json` — on Windows
+`C:\Users\<you>\AppData\Local\PersonalVault\client_secret.json`. You never copy it by hand: the
+first time you click **Link Google Drive**, the app asks for the JSON you downloaded and puts a
+copy there (that folder is outside the repository, and the name is git-ignored). One file
+serves every profile and every device — `drive.file` access belongs to the OAuth client, so the
+same file is what makes each device see the same vaults.
+
+## 8. Link a profile
+
+1. Unlock the profile. The line at the top says **Sync off** and offers **Link Google Drive**.
+2. Click it. The first time, choose your `client_secret.json`; then a browser tab opens. Sign in
+   as the throwaway account and approve the `drive.file` request. That tab is the only thing
+   that ever sees your Google password — the app never does.
+3. The app stores the refresh token **inside the vault**, in the hidden `.app` group as the
+   `drive-sync` entry, so it is locked with everything else, and syncing starts: the line goes
+   **Waiting to upload**, then **Synced**.
+
+What lands in Drive is `My Drive/PersonalVault/<profile id>/vault.kdbx`. It is found by an
+`appProperties` marker, never by name, so renaming or moving it does not break sync. Drive only
+receives the encrypted file, and only bytes that were verified by decrypting them first (I10).
+
+Uploads wait out the **upload quiet period** (Settings, 10 s by default) after a save, so a
+burst of edits is one upload. A full sync also runs every **sync interval** minutes (Settings,
+60 by default), on unlock, when the network comes back, and on **Sync now**.
+
+## 9. A second device
+
+Install the app, copy the same `client_secret.json`, and sign in with the same throwaway
+account. Two cases:
+
+- **The profile is new there:** sync uploads its vault and the line goes **Synced**.
+- **Drive already has a vault for that profile** (you copied the profile folder across, or you
+  are re-creating it after a reinstall): the app decides nothing. The line says **Needs
+  attention** and offers **Use Drive's copy** or **Keep this vault**. Whichever you choose, the
+  losing copy is still kept — locally in `backups/`, and in Drive's revision history. This is
+  the ADR-010 rule: a sync never overwrites a copy it has not seen.
+
+## 10. What the status line means
+
+| Line | What it means | What to do |
+| --- | --- | --- |
+| **Synced** | This device and Drive hold the same file. | Nothing. |
+| **Waiting to upload** | A change here is newer than Drive's copy and the upload is queued. | Nothing, or **Sync now**. |
+| **Offline** — retrying at HH:MM | Drive could not be reached. Retries go 30 s, 1, 2, 4, 8, 16, 30 minutes apart, then every 30 minutes; a success resets that. | Nothing: it catches up by itself. |
+| **Conflict** | Both copies changed since the last sync, and nothing has been uploaded, adopted or deleted. | The banner's three choices (below). |
+| **Reconnect Google** | Google no longer accepts this profile's sign-in (revoked, expired, or the scope changed). | **Unlink**, then **Link Google Drive** again. |
+| **Sync off** | This profile is not linked: never linked, unlinked, or the vault is locked. | **Link Google Drive**, or unlock. |
+| **Needs attention** | Something only you can decide — usually the first link above, or Drive's file is missing or in the bin. | Read the line; if it is in the bin, restore it in Drive and press **Sync now**. |
+
+**Unlink** forgets the sign-in: the token entry is deleted from the vault and syncing stops.
+The vault, its backups and the file in Drive are untouched. To make Google forget the app as
+well, remove its access at <https://myaccount.google.com/permissions>.
+
+## 11. A conflict, and the three choices
+
+A conflict is not an error: it means this device and another one both saved changes between two
+syncs, and the app refused to guess which is right. The line says **Conflict** and a banner
+appears above the list:
+
+- **Keep mine** — this device's vault goes to Drive. Drive's copy is kept in
+  `<profile folder>/sync/conflicts/` and in Drive's revision history, so nothing is lost.
+- **Take theirs** — Drive's copy becomes this device's vault. Your file is backed up to
+  `backups/` first, then their copy is uploaded, so Drive and this device agree again.
+- **Open both** — Drive's copy opens read-only in a window beside your vault, with the same
+  guarded clipboard, so entries can be carried across by hand before you choose.
+
+Nothing happens until you click one of them. M6 adds entry-level merge, which replaces
+**Open both** for the everyday case of two devices editing different entries.
+
+## 12. What sync does not do yet
+
+- It moves whole files: two devices editing *different* entries still meet a conflict (M6).
+- It never touches anything in your Drive except the `drive.file` files it created.
+- It does not sync while the vault is locked: the master password is what verifies every upload
+  and every adoption.
+- Deleting the vault file in Drive stops that profile's sync and asks; it is never silently
+  re-created.

@@ -5,11 +5,15 @@ I2: secrets never reach logs or exception messages.
 I3: a weak-KDF override exists only in the test fixtures.
 I4: the bridge never returns a password for a URL that does not match the entry.
 I5: a locked vault answers every bridge request with ``locked`` and nothing else.
+I6: a sync never uploads over a remote copy this device has not seen.
+I7: a downloaded file is never adopted until it decrypts.
+I10: Drive only ever receives bytes that match the file storage verified.
 """
 
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import logging
 import uuid
@@ -23,6 +27,8 @@ from personal_vault.core.errors import InvalidPassword
 from personal_vault.core.models import SecretStr
 from personal_vault.core.redaction import MARKER, RedactionFilter
 from personal_vault.core.vault import VaultSession, open_vault
+from personal_vault.sync.engine import Status, SyncEngine
+from personal_vault.sync.fake_drive import FakeDrive
 
 pytestmark = pytest.mark.security
 
@@ -213,3 +219,106 @@ def test_i5_locked_vault_answers_only_locked(weak_session: VaultSession) -> None
     for kind in VAULT_TYPES:
         reply = json.loads(dispatcher.dispatch(_request(kind, payloads[kind])))
         assert reply == {"v": 1, "id": "req-1", "ok": False, "error": {"code": "locked"}}, kind
+
+
+# --- I6/I7/I10: the Drive sync, exercised through the real engine ---
+
+SYNC_PROFILE = "9f2c1d3e4b5a69788796a5b4c3d2e1f0"
+
+
+def _sync_engine(tmp_path: Path, *, linked: bool = True) -> tuple[SyncEngine, FakeDrive, Path]:
+    """A linked profile whose vault verifies (the engine only asks yes or no)."""
+    vault_path = build_weak_vault(tmp_path / "vault.kdbx")
+    fake = FakeDrive()
+    engine = SyncEngine(
+        client=fake,
+        vault_path=vault_path,
+        backups_dir=tmp_path / "backups",
+        sync_dir=tmp_path / "sync",
+        profile_id=SYNC_PROFILE,
+        verify_decrypts=_decrypts,
+        refresh_credentials=lambda: None,
+    )
+    if linked:
+        assert engine.run_once().status is Status.SYNCED
+    return engine, fake, vault_path
+
+
+def _decrypts(path: Path) -> bool:
+    try:
+        open_vault(path, WEAK_PASSWORD)
+    except Exception:
+        return False
+    return True
+
+
+def _edit_here(vault_path: Path, tmp_path: Path, engine: SyncEngine) -> None:
+    """A save on this device, the way the UI reports one to the sync worker."""
+    with VaultSession.open(vault_path, WEAK_PASSWORD, tmp_path / "backups") as session:
+        session.add(make_login(title="Edited Here"))
+        session.save()
+    engine.mark_saved()
+
+
+def test_i6_a_sync_never_uploads_over_a_copy_it_has_not_seen(tmp_path: Path) -> None:
+    """Their write lands between our check and our upload: their copy is kept."""
+    engine, fake, vault_path = _sync_engine(tmp_path)
+    _edit_here(vault_path, tmp_path, engine)
+    theirs = build_weak_vault(tmp_path / "theirs.kdbx", password="theirs-master-password")
+    fake.before["upload"] = lambda drive: drive.write_from_another_device(
+        theirs.read_bytes(), profile_id=SYNC_PROFILE
+    )
+
+    result = engine.run_once()
+
+    assert result.status is Status.CONFLICT
+    kept = sorted((tmp_path / "sync" / "conflicts").glob("*.kdbx"))
+    assert kept and kept[0].read_bytes() == theirs.read_bytes()
+    assert vault_path.read_bytes() != theirs.read_bytes()  # never adopted without a choice
+
+
+def test_i6_a_first_link_never_overwrites_what_it_finds(tmp_path: Path) -> None:
+    engine, fake, vault_path = _sync_engine(tmp_path, linked=False)
+    theirs = build_weak_vault(tmp_path / "theirs.kdbx", password="theirs-master-password")
+    file_id = fake.write_from_another_device(theirs.read_bytes(), profile_id=SYNC_PROFILE)
+    before = vault_path.read_bytes()
+
+    result = engine.run_once()
+
+    assert result.status is Status.ATTENTION
+    assert fake.stored_bytes(file_id) == theirs.read_bytes()  # untouched on Drive
+    assert vault_path.read_bytes() == before  # and untouched here
+
+
+def test_i7_a_file_that_does_not_decrypt_is_never_adopted(tmp_path: Path) -> None:
+    engine, fake, vault_path = _sync_engine(tmp_path)
+    before = vault_path.read_bytes()
+    theirs = build_weak_vault(tmp_path / "theirs.kdbx", password="theirs-master-password")
+    fake.write_from_another_device(theirs.read_bytes(), profile_id=SYNC_PROFILE)
+
+    result = engine.run_once()
+
+    assert result.status is Status.UNREADABLE
+    assert vault_path.read_bytes() == before  # the local vault is untouched
+    kept = sorted((tmp_path / "sync" / "incoming").glob("*.kdbx"))
+    assert kept and kept[0].read_bytes() == theirs.read_bytes()  # kept, never adopted
+    assert not sorted((tmp_path / "backups").glob("vault-*.kdbx"))  # nothing was replaced
+
+
+def test_i10_drive_receives_only_the_bytes_the_file_verified_to(tmp_path: Path) -> None:
+    canary = "CANARY-sync-a3f9d2e1-77b4"
+    engine, fake, vault_path = _sync_engine(tmp_path)
+    with VaultSession.open(vault_path, WEAK_PASSWORD, tmp_path / "backups") as session:
+        session.add(make_login(password=SecretStr(canary)))
+        session.save()
+    engine.mark_saved()
+
+    assert engine.run_once().status is Status.SYNCED
+
+    file_id = fake.find_vault_file(SYNC_PROFILE)
+    assert file_id is not None
+    uploaded = fake.stored_bytes(file_id.id)
+    assert uploaded == vault_path.read_bytes()  # the bytes on disk, exactly
+    assert hashlib.sha256(uploaded).hexdigest() == engine.state().last_synced_local_sha256
+    assert canary.encode() not in uploaded  # encrypted before it ever left the machine
+    assert WEAK_PASSWORD.encode() not in uploaded
