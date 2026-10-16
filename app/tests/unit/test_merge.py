@@ -180,8 +180,13 @@ def test_a_deletion_recorded_here_survives_the_merge() -> None:
     """A stale copy must not be able to bring back what was deleted."""
     gone = uuid.uuid4()
     fresh = uuid.uuid4()
-    ours = _side([_entry(fresh)], deleted={gone: LATER})
-    theirs = _side([_entry(fresh), _entry(gone)])
+    # one entry, both sides: the same object, as a copy of an untouched entry is.
+    # Two entries built separately would carry two created_at times a microsecond
+    # apart, and the same-instant tie-break reads them as content — which made this
+    # test pass on Windows (a coarse clock) and fail on Linux (a fine one).
+    shared = _entry(fresh)
+    ours = _side([shared], deleted={gone: LATER})
+    theirs = _side([shared, _entry(gone)])
 
     plan = merge_sides(ours, theirs)
 
