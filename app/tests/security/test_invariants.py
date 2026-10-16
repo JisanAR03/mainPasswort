@@ -17,18 +17,25 @@ import hashlib
 import json
 import logging
 import uuid
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fixtures.weak_vault import WEAK_PASSWORD, build_weak_vault, make_login
 from personal_vault.bridge.backend import VaultBackend
 from personal_vault.bridge.protocol import VAULT_TYPES, Dispatcher
 from personal_vault.core.errors import InvalidPassword
-from personal_vault.core.models import SecretStr
+from personal_vault.core.models import LoginEntry, SecretStr
 from personal_vault.core.redaction import MARKER, RedactionFilter
 from personal_vault.core.vault import VaultSession, open_vault
 from personal_vault.sync.engine import Status, SyncEngine
 from personal_vault.sync.fake_drive import FakeDrive
+from personal_vault.ui import vault_view
+from personal_vault.ui.app import configure_logging
+from personal_vault.ui.vault_view import VaultView
+from PySide6.QtWidgets import QDialog
+from pytestqt.qtbot import QtBot
 
 pytestmark = pytest.mark.security
 
@@ -64,6 +71,62 @@ def test_i2_error_messages_never_contain_secrets(weak_vault_path: Path) -> None:
     with pytest.raises(InvalidPassword) as excinfo:
         open_vault(weak_vault_path, canary)
     assert canary not in str(excinfo.value)
+
+
+def test_i2_the_app_never_logs_an_entry_field(
+    weak_vault_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    qtbot: QtBot,
+) -> None:
+    """The test above tests the filter; this one tests the app.
+
+    A real add and a real edit, with a canary in every field, and every log record
+    kept at DEBUG — after the app's own logging setup has run, as it does at start.
+
+    Two ways an entry field reached a log before this test existed:
+    ``log.debug("saved entry %s", entry)`` sent the whole entry, and pykeepass logs
+    the XPath behind a search, which carries the title and the username.
+    """
+    canaries = [
+        "CANARY-title-4b7c",
+        "CANARY-user-4b7c",
+        "CANARY-pass-4b7c",
+        "CANARY-notes-4b7c",
+    ]
+    fields: dict[str, Any] = {
+        "title": canaries[0],
+        "username": canaries[1],
+        "password": SecretStr(canaries[2]),
+        "notes": canaries[3],
+    }
+    session = VaultSession.open(weak_vault_path, WEAK_PASSWORD, weak_vault_path.parent / "backups")
+
+    class _FakeForm:
+        """Accepts immediately with a canary entry, for the add and the edit flow."""
+
+        def __init__(self, existing: LoginEntry | None = None) -> None:
+            result = make_login(**fields)
+            if existing is not None:
+                result = replace(result, id=existing.id, created_at=existing.created_at)
+            self.result_entry = result
+
+        def exec(self) -> QDialog.DialogCode:
+            return QDialog.DialogCode.Accepted
+
+    configure_logging()  # what run() does before the first window exists
+    monkeypatch.setattr(vault_view, "EntryFormDialog", _FakeForm)
+    view = VaultView(session)
+    qtbot.addWidget(view)
+
+    with caplog.at_level(logging.DEBUG):
+        view._add_flow()
+        view._list.setCurrentRow(0)
+        view._edit_selected()
+
+    assert [summary.title for summary in session.list_logins()] == [canaries[0]]  # the flows ran
+    leaked = sorted(value for value in canaries if value in caplog.text)
+    assert leaked == [], "an entry field reached the log"
 
 
 def _uses_weak_override(path: Path) -> bool:

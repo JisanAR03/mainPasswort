@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from typing import cast
 
@@ -110,7 +111,19 @@ class App(QMainWindow):
         self.activateWindow()
 
 
+def configure_logging() -> None:
+    """Keep third-party DEBUG out of any log a user might attach to a report.
+
+    The app installs no handler, so nothing below WARNING reaches anywhere today.
+    pykeepass logs the XPath behind every search, though, and that string carries
+    the entry's title and username — so it must not land in a log file the day one
+    is added (rule 3, invariant I2).
+    """
+    logging.getLogger("pykeepass").setLevel(logging.WARNING)
+
+
 def run() -> int:
+    configure_logging()
     app = QApplication(sys.argv)
     window = App()
     window.show()
