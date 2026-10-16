@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from fixtures.weak_vault import WEAK_PASSWORD, build_weak_vault
 from personal_vault.core.vault import VaultSession
-from personal_vault.services import Profile, profiles
+from personal_vault.services import Profile, profile_vault_path, profiles
 from personal_vault.ui.unlock import UnlockWindow
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QLineEdit, QMessageBox
@@ -99,3 +99,62 @@ def test_correct_password_unlocks_and_clears(qtbot: QtBot, profile_with_vault: P
     assert isinstance(opened[0], VaultSession)
     opened[0].close()
     assert window._password.text() == ""
+
+
+def test_a_profile_without_a_vault_asks_for_a_new_master_password(qtbot: QtBot) -> None:
+    """A profile that was only just named has no vault: the window says so."""
+    profile = profiles().create("Fresh")
+    window = UnlockWindow(profile)
+    qtbot.addWidget(window)
+    labels = [label.text() for label in window.findChildren(QLabel)]
+    assert f"Create {profile.display_name}" in labels
+    assert window._unlock_button.text() == "Create vault"
+    assert not profile_vault_path(profile).exists()
+
+
+def test_first_unlock_creates_the_vault_and_that_is_its_password(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first-run path: name a profile, unlock it, and it works from then on.
+
+    Before this, "New profile" wrote the name and nothing ever made the vault,
+    so the first unlock answered "the vault file is damaged" forever.
+    """
+    shown = _warnings(monkeypatch)
+    profile = profiles().create("Fresh")
+    window = UnlockWindow(profile)
+    qtbot.addWidget(window)
+    opened: list[object] = []
+    window.unlocked.connect(opened.append)
+    window._password.setText("first-master-password")
+    qtbot.mouseClick(window._unlock_button, Qt.MouseButton.LeftButton)
+
+    assert shown == []
+    assert len(opened) == 1
+    assert isinstance(opened[0], VaultSession)
+    opened[0].close()
+    assert profile_vault_path(profile).exists()
+
+    # This window is kept for the life of the profile and comes back on lock:
+    # shown again, it must no longer offer to create what now exists.
+    window.show()
+    assert window._unlock_button.text() == "Unlock"
+
+    # It is a real vault now: the same password opens it...
+    second = UnlockWindow(profile)
+    qtbot.addWidget(second)
+    assert second._unlock_button.text() == "Unlock"
+    again: list[object] = []
+    second.unlocked.connect(again.append)
+    second._password.setText("first-master-password")
+    qtbot.mouseClick(second._unlock_button, Qt.MouseButton.LeftButton)
+    assert len(again) == 1
+    assert isinstance(again[0], VaultSession)
+    again[0].close()
+
+    # ...and another one does not, so the typed password really is the master.
+    wrong = UnlockWindow(profile)
+    qtbot.addWidget(wrong)
+    wrong._password.setText("a-different-long-password")
+    qtbot.mouseClick(wrong._unlock_button, Qt.MouseButton.LeftButton)
+    assert any("Wrong master password" in text for text in shown)

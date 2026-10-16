@@ -37,3 +37,12 @@ and no outside security review has been done. Each milestone below has a card in
 
 - M6: `log.debug("saved entry %s", entry)` became `entry.id`, and pykeepass is held at
   `WARNING` — neither an entry's fields nor the XPath behind a search can reach a log.
+
+### Fixed
+
+- The first unlock of a new profile creates its vault (2026-10-16). "New profile" writes the
+  name into `profiles.json` and nothing else, and no code path ever made the vault file: every
+  profile was unopenable, and the unlock window answered "the vault file is damaged and could
+  not be read" forever. Found by the owner's first run of the packaged app; every test built its
+  own vault, so none of them walked this path. The unlock window now says **Create** when the
+  vault is absent, and that password becomes the vault's master password.

@@ -81,6 +81,7 @@ __all__ = [
     "open_profile_vault",
     "open_vault",
     "profile_vault_dir",
+    "profile_vault_path",
     "profiles",
     "restore_backup",
     "review_copy",
@@ -188,14 +189,28 @@ def profile_vault_dir(profile: Profile) -> Path:
     return data_dir() / "profiles" / profile.id
 
 
+def profile_vault_path(profile: Profile) -> Path:
+    """A profile's vault file: <data>/profiles/<id>/vault.kdbx."""
+    return profile_vault_dir(profile) / "vault.kdbx"
+
+
 def open_profile_vault(profile: Profile, password: str) -> VaultSession:
     """Open a profile's vault for a session (the ui unlock path).
+
+    A profile with no vault file yet — one just created, whose name is all
+    ``ProfileStore`` writes down — is *created* here with the password just
+    typed, so the first unlock is what makes the vault. The unlock window
+    says "Create" instead of "Unlock" in that case, so the two are never
+    confused.
 
     Raises InvalidPassword for a wrong master password and VaultCorrupted for
     a damaged file; the ui shows those messages and never the cause.
     """
     folder = profile_vault_dir(profile)
-    return VaultSession.open(folder / "vault.kdbx", password, folder / "backups")
+    path = profile_vault_path(profile)
+    if not path.exists():
+        return VaultSession.create(path, password, folder / "backups")
+    return VaultSession.open(path, password, folder / "backups")
 
 
 def list_logins(session: VaultSession) -> list[LoginSummary]:
