@@ -64,8 +64,22 @@ def _windows_key() -> str:
     return rf"Software\Chromium\NativeMessagingHosts\{HOST_NAME}"
 
 
-def _posix_manifest_path() -> Path:
-    return Path.home() / ".config" / "chromium" / "NativeMessagingHosts" / f"{HOST_NAME}.json"
+def _posix_manifest_paths(profile_dir: Path) -> list[Path]:
+    """Everywhere the Linux browser may look for a user-level host.
+
+    Playwright's Linux Chromium build is branded Chrome for Testing, which
+    reads Chrome's directory rather than Chromium's; a browser started with
+    ``--user-data-dir`` also looks inside that directory. Writing all three is
+    cheaper than guessing which one this build uses.
+    """
+    brands = [
+        Path.home() / ".config" / brand / "NativeMessagingHosts"
+        for brand in ("chromium", "google-chrome")
+    ]
+    return [
+        *(brand / f"{HOST_NAME}.json" for brand in brands),
+        profile_dir / "NativeMessagingHosts" / f"{HOST_NAME}.json",
+    ]
 
 
 def _launcher_text(socket_name: str) -> tuple[str, str]:
@@ -79,7 +93,13 @@ def _launcher_text(socket_name: str) -> tuple[str, str]:
 
 
 @pytest.fixture(scope="session")
-def host_socket(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+def chromium_profile(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The browser's user-data-dir, so the host can register inside it too."""
+    return tmp_path_factory.mktemp("chromium-profile")
+
+
+@pytest.fixture(scope="session")
+def host_socket(tmp_path_factory: pytest.TempPathFactory, chromium_profile: Path) -> Iterator[str]:
     """Register the native host for Playwright's Chromium and hand back the
     socket name its launcher points at."""
     name = f"pv-e2e-{uuid.uuid4().hex}"
@@ -108,9 +128,9 @@ def host_socket(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _windows_key()) as key:
             winreg.SetValueEx(key, None, 0, winreg.REG_SZ, str(manifest))
     else:
-        target = _posix_manifest_path()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(manifest.read_text(encoding="utf-8"), encoding="utf-8")
+        for target in _posix_manifest_paths(chromium_profile):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(manifest.read_text(encoding="utf-8"), encoding="utf-8")
     yield name
     if os.name == "nt":
         import winreg
@@ -120,7 +140,8 @@ def host_socket(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         except FileNotFoundError:
             pass
     else:
-        _posix_manifest_path().unlink(missing_ok=True)
+        for target in _posix_manifest_paths(chromium_profile):
+            target.unlink(missing_ok=True)
 
 
 @pytest.fixture(scope="session")
@@ -137,13 +158,13 @@ def test_extension(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture(scope="session")
 def browser(
-    test_extension: Path, host_socket: str, tmp_path_factory: pytest.TempPathFactory
+    test_extension: Path, host_socket: str, chromium_profile: Path
 ) -> Iterator[BrowserContext]:
     """One headless Chromium for the whole e2e run, extension loaded and the
     pairing key already in extension storage."""
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(
-            user_data_dir=str(tmp_path_factory.mktemp("chromium-profile")),
+            user_data_dir=str(chromium_profile),
             channel="chromium",
             headless=True,
             args=[
