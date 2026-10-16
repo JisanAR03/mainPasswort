@@ -1,7 +1,8 @@
 # Milestones
 
 > Source: design pack v0.1, sections 10–12. Status: **G0 passed 2026-10-15; M0–M3 built and
-> self-reviewed 2026-10-15 — owner checks pending at G1 and G2.**
+> self-reviewed 2026-10-15; M4 built and self-reviewed 2026-10-16 — owner checks pending at
+> G1, G2 and G3.**
 
 Seven milestones, M0 to M6. Each is split into tasks small enough for one AI session, and each
 is closed by a gate that the owner signs off. A milestone is done only when every "Done when"
@@ -28,9 +29,9 @@ left D2 (license, Q6) and Q7 (first importer) open. See [docs/adr/](../adr/).
 
 | When | Milestones |
 | --- | --- |
-| Now | M3 bridge and native host (M0–M2 merged; M3 self-reviewed, merge pending; G1/G2 sign-off pending) |
-| Next | M4 browser extension |
-| Later | M5 Google Drive sync, M6 merge, hardening and release |
+| Now | M4 browser extension (M0–M3 merged; M4 self-reviewed, merge pending; G1/G2/G3 sign-off pending) |
+| Next | M5 Google Drive sync |
+| Later | M6 merge, hardening and release |
 
 Dates stay open until M0 shows how many task cards get finished in a week.
 
@@ -155,13 +156,13 @@ Tasks:
 
 Done when (Playwright, with the extension loaded, against pages in `extension/test-pages/`):
 
-- [ ] A normal login page fills after one click and does not submit
-- [ ] A cross-origin iframe login form is never filled
-- [ ] Hidden, zero-size and transparent fields are never filled
-- [ ] A look-alike domain gets no suggestions
-- [ ] An https entry is refused on an http page
-- [ ] Navigating between listing and clicking aborts the fill
-- [ ] M4b: nothing is saved without a click in the popup
+- [x] A normal login page fills after one click and does not submit
+- [x] A cross-origin iframe login form is never filled
+- [x] Hidden, zero-size and transparent fields are never filled
+- [x] A look-alike domain gets no suggestions
+- [x] An https entry is refused on an http page
+- [x] Navigating between listing and clicking aborts the fill
+- [x] M4b: nothing is saved without a click in the popup
 
 ## M5: Google Drive sync
 
