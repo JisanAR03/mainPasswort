@@ -1,12 +1,12 @@
-"""M5-05: the conflict banner, and the three ways out of one.
+"""M5-05: the conflict banner, and the ways out of one.
 
 Showing the banner changes nothing: no upload, no adoption, no deletion
-happens until the owner clicks one of the three buttons, and each button is
-the sync layer's own method (keep mine = upload, take theirs = adopt, open
-both = look at the kept copy). While a conflict stands, the engine neither
-uploads nor adopts anything.
+happens until the owner clicks a button, and each button is the sync layer's
+own method (merge both = entry by entry, M6-01; keep mine = upload; take
+theirs = adopt; open both = look at the kept copy). While a conflict stands,
+the engine neither uploads nor adopts anything.
 
-The banner is deliberately ignorant of the sync internals: it gets three
+The banner is deliberately ignorant of the sync internals: it gets the
 callables and reports what they answered.
 """
 
@@ -32,11 +32,12 @@ class SyncOutcome:
 
 @dataclass(frozen=True)
 class ConflictActions:
-    """The three buttons' work; services.py supplies the real callables."""
+    """The buttons' work; services.py supplies the real callables."""
 
     keep_mine: Callable[[], SyncOutcome]
     take_theirs: Callable[[], SyncOutcome]
     open_theirs: Callable[[Path], None]
+    merge_both: Callable[[], SyncOutcome]  # M6-01: both copies keep both edits
 
 
 def _when(value: object) -> str:
@@ -66,15 +67,17 @@ class SyncBanner(QWidget):
         self._status_label = QLabel()
         self._status_label.setWordWrap(True)
 
+        self.merge_button = QPushButton("Merge both")
         self.keep_button = QPushButton("Keep mine")
         self.take_button = QPushButton("Take theirs")
         self.open_button = QPushButton("Open both")
+        self.merge_button.clicked.connect(lambda: self._resolve("merge_both"))
         self.keep_button.clicked.connect(lambda: self._resolve("keep_mine"))
         self.take_button.clicked.connect(lambda: self._resolve("take_theirs"))
         self.open_button.clicked.connect(self._open_theirs)
 
         buttons = QHBoxLayout()
-        for button in (self.keep_button, self.take_button, self.open_button):
+        for button in (self.merge_button, self.keep_button, self.take_button, self.open_button):
             buttons.addWidget(button)
 
         layout = QVBoxLayout(self)
@@ -124,7 +127,11 @@ class SyncBanner(QWidget):
     def _resolve(self, which: str) -> None:
         if self._actions is None:
             return
-        action = self._actions.keep_mine if which == "keep_mine" else self._actions.take_theirs
+        action = {
+            "keep_mine": self._actions.keep_mine,
+            "take_theirs": self._actions.take_theirs,
+            "merge_both": self._actions.merge_both,
+        }[which]
         self._set_buttons_enabled(False)
         try:
             outcome = action()
@@ -154,5 +161,10 @@ class SyncBanner(QWidget):
         )
 
     def _set_buttons_enabled(self, enabled: bool) -> None:
-        for button in (self.keep_button, self.take_button, self.open_button):
+        for button in (
+            self.merge_button,
+            self.keep_button,
+            self.take_button,
+            self.open_button,
+        ):
             button.setEnabled(enabled)

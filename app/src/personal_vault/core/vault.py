@@ -8,11 +8,14 @@ them) and dropped on close().
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import shutil
 import struct
 import uuid
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +27,7 @@ from pykeepass.exceptions import CredentialsError
 from personal_vault.core import kdf, storage
 from personal_vault.core.errors import InvalidPassword, VaultCorrupted, VaultError
 from personal_vault.core.matching import host_and_port_of_url, match_urls
+from personal_vault.core.merge import MergeSide, merge_sides
 from personal_vault.core.models import LoginEntry, LoginSummary, SecretStr
 
 LOGINS_GROUP = "Logins"
@@ -33,6 +37,10 @@ MAX_HISTORY = 10
 DEFAULT_KEEP_RECENT = 20
 DEFAULT_KEEP_DAILY = 30
 MATCH_SUBDOMAINS_KEY = "PM_MATCH_SUBDOMAINS"
+
+# pykeepass has no API for the deletion records (the M0 spike found the element
+# survives save and reopen untouched), so they are read and written as XML.
+DELETED_OBJECTS_XPATH = "/KeePassFile/Root/DeletedObjects/DeletedObject"
 
 _KDBX_SIG1 = b"\x03\xd9\xa2\x9a"
 _KDBX_SIG2 = b"\x67\xfb\x4b\xb5"
@@ -152,6 +160,19 @@ def _apply_login(entry: Any, login: LoginEntry) -> None:
         entry.delete_custom_property(key)
     for index, url in enumerate(login.urls[1:], start=1):
         entry.set_custom_property(f"KP2A_URL_{index}", url)
+
+
+@dataclass(frozen=True)
+class MergeReport:
+    """What merging another copy changed here, for the sentence the UI shows."""
+
+    added: int = 0
+    updated: int = 0
+    deleted: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.added + self.updated + self.deleted
 
 
 class VaultSession:
@@ -389,10 +410,19 @@ class VaultSession:
             current.delete_history(current.history[0])
 
     def delete(self, entry_id: uuid.UUID) -> None:
+        self._trash(entry_id, datetime.now(UTC))
+
+    def _trash(self, entry_id: uuid.UUID, deleted_at: datetime) -> None:
+        """Move an entry to the Recycle Bin and record when it happened.
+
+        ``trash_entry`` leaves ``mtime`` at the last edit, so without this a
+        deletion has no time and a merge cannot compare it with an edit.
+        """
         entry = self._find_anywhere(entry_id)
         if entry.group is not None and entry.group.name == RECYCLE_BIN_GROUP:
             raise ValueError("entry is already in the Recycle Bin")
         self._open_kp.trash_entry(entry)
+        entry.mtime = deleted_at
 
     def get(self, entry_id: uuid.UUID) -> LoginEntry:
         return _entry_to_login(self._find_anywhere(entry_id))
@@ -448,6 +478,100 @@ class VaultSession:
     def history(self, entry_id: uuid.UUID) -> list[LoginEntry]:
         entry = self._find_anywhere(entry_id)
         return [_entry_to_login(item) for item in entry.history]
+
+    # --- merging another copy of this vault (M6-01) -------------------------
+
+    def tombstones(self) -> dict[uuid.UUID, datetime]:
+        """The entries this file records as deleted, and when.
+
+        Empty for a vault nothing has ever been permanently deleted from: the
+        element exists but holds no ``DeletedObject``.
+        """
+        result: dict[uuid.UUID, datetime] = {}
+        for element in self._open_kp.xpath(DELETED_OBJECTS_XPATH):
+            raw_id = element.findtext("UUID")
+            raw_time = element.findtext("DeletionTime")
+            if not raw_id or not raw_time:  # a record we cannot read is no record
+                continue
+            result[uuid.UUID(bytes=base64.b64decode(raw_id))] = _utc(
+                self._open_kp._decode_time(raw_time)
+            )
+        return result
+
+    def _write_tombstones(self, tombstones: Mapping[uuid.UUID, datetime]) -> None:
+        """Replace the file's deletion records with these.
+
+        A tombstone that lost to a later edit is spent and goes; one that won is
+        written down, so a copy merged against a stale vault later still cannot
+        bring the entry back.
+        """
+        root = self._open_kp.tree.getroot()
+        parent = root.find("Root")
+        element = parent.find("DeletedObjects")
+        if element is None:
+            element = parent.makeelement("DeletedObjects", {})
+            parent.append(element)
+        for child in list(element):
+            element.remove(child)
+        for entry_id, deleted_at in sorted(tombstones.items(), key=lambda item: str(item[0])):
+            deleted = element.makeelement("DeletedObject", {})
+            for tag, text in (
+                ("UUID", base64.b64encode(entry_id.bytes).decode()),
+                ("DeletionTime", self._open_kp._encode_time(deleted_at)),
+            ):
+                node = deleted.makeelement(tag, {})
+                node.text = text
+                deleted.append(node)
+            element.append(deleted)
+
+    def merge_side(self) -> MergeSide:
+        """This vault as the merge sees it.
+
+        Only the ``Logins`` group and the Recycle Bin take part. The hidden
+        ``.app`` group (the pairing key, the Drive token) and any group the owner
+        made in another program are left out, so a merge can never move a token
+        or an entry this app does not understand between vaults.
+        """
+        entries = {entry.uuid: _entry_to_login(entry) for entry in self._logins_group().entries}
+        deleted = self.tombstones()
+        for group in self._open_kp.groups:
+            if group.name != RECYCLE_BIN_GROUP:
+                continue
+            for entry in group.entries:
+                when = _utc(entry.mtime)
+                if entry.uuid not in deleted or when > deleted[entry.uuid]:
+                    deleted[entry.uuid] = when
+        return MergeSide(entries=entries, tombstones=deleted)
+
+    def merge_from(self, other: VaultSession) -> MergeReport:
+        """Merge another copy of this vault into this one, and save it.
+
+        The later change wins for each entry (core/merge.py); when a live entry
+        loses, the version that lost goes to that entry's history first, exactly
+        as an ordinary edit would. ``other`` is only read, so it can be a copy
+        opened beside the vault.
+        """
+        plan = merge_sides(self.merge_side(), other.merge_side())
+        added = updated = deleted = 0
+        for action in plan.actions:
+            if action.entry is None:
+                if action.deleted_at is not None:
+                    self._trash(action.id, action.deleted_at)
+                    deleted += 1
+                continue
+            try:
+                current = self._find_anywhere(action.id)
+            except KeyError:
+                self.add(action.entry)
+                added += 1
+                continue
+            if current.group is not None and current.group.name == RECYCLE_BIN_GROUP:
+                self._open_kp.move_entry(current, self._logins_group())  # edited after a delete
+            self.edit(action.entry)
+            updated += 1
+        self._write_tombstones(plan.tombstones)
+        self.save()
+        return MergeReport(added=added, updated=updated, deleted=deleted)
 
     # --- hidden .app group ---------------------------------------------------
 

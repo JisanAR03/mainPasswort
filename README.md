@@ -3,8 +3,11 @@
 A personal, local-first password manager for the desktop, with a browser extension and
 optional Google Drive sync. The design spec calls it **Personal Vault**.
 
-> **Status: G0 approved (2026-10-15), M0 in progress.** There is no application code yet.
-> The design is draft v0.1 of the pre-build design pack.
+> **Status: M0–M5 merged, M6 in progress (2026-10-16).** The desktop app, the browser
+> extension and Drive sync are built and covered by the test suite. Gates **G2** (a signed
+> `[S]` read-through) and **G4** (the two-device Drive test) are still open, so do not put a
+> real password in it yet, and do not turn sync on for a real vault. See
+> [Known limitations](docs/known-limitations.md) before you trust it with anything.
 
 ## Security limits: read this first
 
@@ -18,11 +21,13 @@ what a web page can extract. It **cannot** protect you from:
 Profiles do not separate people who share one OS login. Anyone with that login can install a
 keylogger, so give each person their own OS account. There is no backdoor: if you forget the
 master password, the vault cannot be opened. See
-[docs/specs/threat-model.md](docs/specs/threat-model.md).
+[docs/specs/threat-model.md](docs/specs/threat-model.md), and
+[docs/known-limitations.md](docs/known-limitations.md) for everything else this app does not
+do — including the parts that have not been reviewed by anyone outside this project.
 
 ## Features
 
-Planned for v1, the minimum viable version:
+Built and tested through M5:
 
 - Separate **profiles** (labels for your own accounts, e.g. Work, Social Media, School),
   each stored as a standard KeePass **KDBX 4** file, so KeePassXC can always open a vault if
@@ -39,7 +44,7 @@ Not in v1: TOTP codes, passkeys, attachments, shared vaults, a mobile app, in-pa
 dropdowns, autofill on page load, unlocking from the browser, biometrics, breach checks,
 Firefox and auto-update.
 
-## Planned tech stack
+## Tech stack
 
 Python 3.12+, PySide6, pykeepass (KDBX 4), the Google Drive REST API with the `drive.file`
 scope, and a plain-JavaScript Manifest V3 extension with no build step. Tooling: uv, ruff,
@@ -48,8 +53,7 @@ mypy, pytest, pip-audit and gitleaks. The reasons for each choice are in
 
 ## Setup
 
-Prerequisites. [docs/specs/milestones.md](docs/specs/milestones.md) shows when each one is
-first needed.
+Prerequisites.
 
 - Git
 - Python 3.12 or newer
@@ -66,8 +70,6 @@ uv sync                 # create the virtual env from pyproject.toml
 
 ## How to run
 
-There is nothing to run yet. From milestone M0-01 onward, these commands are planned:
-
 ```sh
 uv sync                                                  # create the virtual env from uv.lock
 uv run --env-file .env python -m personal_vault          # start the desktop app
@@ -78,6 +80,10 @@ uv run pytest -m "not e2e and not slow"                  # quick test loop
 Development and test runs must always set `PV_DATA_DIR` to a throwaway folder (see
 `.env.example`), so they never touch a real vault. Real passwords go into the app only after
 gate G2.
+
+The browser extension and Drive sync each have their own setup:
+[docs/setup-browser.md](docs/setup-browser.md) and
+[docs/setup-google-drive.md](docs/setup-google-drive.md).
 
 ## Documentation
 
@@ -91,6 +97,10 @@ gate G2.
 | [Milestones](docs/specs/milestones.md) | Gates G0–G5, milestones M0–M6 and the development workflow |
 | [ADRs](docs/adr/) | Architecture decision records and the owner's decision log |
 | [References](docs/specs/references.md) | External references and source material |
+| [Known limitations](docs/known-limitations.md) | What it does not do, does not protect against, and has not had checked |
+| [Recovery](docs/recovery.md) | Getting a vault back: local backup, Drive revision, KeePassXC |
+| [Manual tests](docs/manual-tests.md) | The owner's test script (gate G2) and the recovery drill (G5) |
+| [Task cards](docs/tasks/) | One card per task: what was built, and what proves it |
 
 ## License
 

@@ -103,6 +103,40 @@ is signed off.
 - [ ] 10.2 A vault the app created opens in KeePassXC with no warnings about the file
       format.
 
+## 11. Recovery drill (M6-02, gate G5)
+
+Walk all three paths in [recovery.md](recovery.md) on the throwaway vault from step 1. Use
+`%TEMP%\pv-recovery\` as the data folder (`set PV_DATA_DIR=%TEMP%\pv-recovery` before
+starting the app) so nothing here can reach a real vault.
+
+- [ ] 11.1 Add an entry named `before`, then edit an entry so a second backup exists. In
+      `%TEMP%\pv-recovery\profiles\<id>\backups\` there are now several
+      `vault-<stamp>-<n>.kdbx` files, and the newest is the last by name.
+- [ ] 11.2 **Backups window.** Add an entry named `after`, then open Backups and restore the
+      backup from *before* it. The entry named `after` is gone and `before` is there: the
+      restore really did roll the file back. Note that the file it replaced was not kept —
+      this is the step that shows it.
+- [ ] 11.3 **By hand.** Close the app. Copy the newest backup over `vault.kdbx`, restart,
+      unlock with the same throwaway password: it opens, and it holds what that backup held.
+      (No entry added since that backup is present — that is what "a backup is a full file"
+      means.)
+- [ ] 11.4 **Corrupt file.** With the app closed, overwrite `vault.kdbx` with a text file
+      renamed to `vault.kdbx`. Start the app and unlock: the message is "The vault file is
+      damaged and could not be read.", not "Wrong master password.", and the app does not
+      crash. Restore a backup by hand (11.3) and check the vault opens again.
+- [ ] 11.5 **Drive conflict copy.** With sync linked, force a conflict (a second device, or
+      the method in [setup-google-drive.md](setup-google-drive.md)). The banner appears and a
+      file lands in `sync\conflicts\`. Press **Take theirs**: the vault becomes their copy,
+      and their bytes are still in `sync\conflicts\` afterwards.
+- [ ] 11.6 **Drive revision.** In Drive's web UI, open the vault file → version history →
+      download a revision from before that conflict. It opens in KeePassXC with the
+      throwaway master password.
+- [ ] 11.7 **KeePassXC GUI.** Open the drill vault in KeePassXC: groups and entries match the
+      app, including the Recycle Bin after a deletion. (This repeats 10.1 on the drill vault
+      and is the point of the drill — it is the path that does not need this project.)
+- [ ] 11.8 **KeePassXC CLI.** `keepassxc-cli ls "<path to vault.kdbx>"` lists the groups;
+      it accepts the same password.
+
 ## Cleanup
 
 - [ ] Delete the test vault, its backups and the exported files. Do not keep the

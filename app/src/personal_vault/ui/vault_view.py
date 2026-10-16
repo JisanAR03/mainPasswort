@@ -208,7 +208,7 @@ class VaultView(QWidget):
                 continue  # dialog re-opens with the fields intact
             if not self._save():
                 return
-            log.debug("saved entry %s", entry)
+            log.debug("saved entry %s", entry.id)  # the id, never a field (rule 3)
             self._refresh()
             return
 
@@ -228,7 +228,7 @@ class VaultView(QWidget):
                 continue
             if not self._save():
                 return
-            log.debug("saved entry %s", entry)
+            log.debug("saved entry %s", entry.id)  # the id, never a field (rule 3)
             self._refresh()
             return
 
