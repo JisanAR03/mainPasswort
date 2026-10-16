@@ -85,3 +85,33 @@ popup; logins inside iframes get no menu and are never offered for saving.
   "all rights reserved" cannot be the terms for that. Running a build you made yourself is
   private use and raises nothing. Deciding this is Q6, and it is a question for the owner and
   a lawyer, not for this page.
+
+## Extension-only mode (EXT-00, proposed ADR-012)
+
+When the extension runs without the desktop app, these hold on top of everything above:
+
+- **The browser holds the vault.** The master password is typed into the browser and the
+  unlocked vault lives in the browser's memory (the extension's offscreen document). A
+  compromised browser, another program reading the browser's memory, or a malicious copy of
+  this extension exposes it. With the desktop app the browser never held either; invariant
+  I9 does not hold in this mode.
+- **An unlock lasts up to 6 hours** (or until the browser closes, or the extension is
+  reloaded or updated). Unattended, that is the window. "Lock when the screen locks" shortens
+  it; it needs the optional "idle" permission.
+- **Uninstalling deletes the vault.** The encrypted file is in the extension's storage in
+  this browser profile; removing the extension or clearing its data removes it. Drive copies
+  and exported `.kdbx` files survive.
+- **Third-party code reads and writes the vault**: kdbxweb 2.1.1 (no release since 2021,
+  one maintainer) and hash-wasm 4.12.0, pinned in `extension/vendor/VENDOR.md`. kdbxweb
+  writes some empty values KeePassXC refuses; the extension fills them in before every save,
+  and the tests open its files in pykeepass and KeePassXC.
+- **Unlocks are slower.** Argon2 runs in WebAssembly, single-threaded: a vault made by the
+  desktop app takes about 3 seconds to unlock in the browser, and each save about twice that
+  (in the background). Vaults the extension creates are calibrated to about a second here,
+  which means fewer Argon2 iterations than the desktop app uses.
+- **No conflict merge in the browser.** A two-sided change offers keep this computer's copy
+  or take the Drive copy; the other copy stays in Drive's version history and in the
+  extension's conflict store. Merging both is the desktop app's.
+- **Not checked against real Google yet** (spike S3): the Google sign-in in Brave, and
+  whether the extension's Web OAuth client sees the files the desktop client made in the same
+  Cloud project. Automated tests use a fake Google.

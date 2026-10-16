@@ -15,11 +15,26 @@
 
     <section id="not-running" hidden>
       <p>Start the Personal Vault desktop app, then reopen this popup.</p>
+      <button id="use-extension" class="plain">Use without the desktop app…</button>
     </section>
 
     <section id="locked" hidden>
       <button id="unlock">Unlock in app</button>
     </section>
+
+    <!-- extension-only mode -->
+    <section id="ext-setup" hidden>
+      <p>No vault in this browser yet.</p>
+      <button id="ext-create">Create a vault</button>
+    </section>
+
+    <form id="ext-unlock" autocomplete="off" hidden>
+      <select id="ext-profile"></select>
+      <input id="ext-password" type="password" placeholder="Master password" />
+      <button id="ext-unlock-button" type="submit">Unlock</button>
+    </form>
+
+    <p id="ext-sync" class="hint" hidden></p>
 
     <section id="unpaired" hidden>
       <p>This browser is not paired with the desktop app yet.</p>
@@ -60,6 +75,8 @@
       <input type="checkbox" id="watch" />
       Offer to save logins
     </label>
+
+    <button id="open-vault" class="plain" hidden>Open vault</button>
 
     <script type="module" src="popup.js"></script>
   </body>

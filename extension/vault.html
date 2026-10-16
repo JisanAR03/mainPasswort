@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Personal Vault</title>
+    <link rel="stylesheet" href="vault.css" />
+  </head>
+  <body>
+    <header class="top">
+      <h1>Personal Vault</h1>
+      <span id="who" class="who"></span>
+      <button id="lock" type="button" hidden>Lock</button>
+    </header>
+    <p id="notice" class="notice" role="status" hidden></p>
+
+    <!-- desktop mode: offer extension-only mode, and say what it gives up -->
+    <section id="view-mode" hidden>
+      <h2>Use Personal Vault without the desktop app</h2>
+      <p>
+        In extension-only mode your vaults live in this browser and everything — creating,
+        unlocking, editing, filling and Google Drive sync — happens here. The desktop app is not
+        needed.
+      </p>
+      <p><strong>What you give up compared with the desktop app:</strong></p>
+      <ul>
+        <li>The master password is typed into the browser, and the unlocked vault is held in
+          the browser's memory. A compromised browser, or a malicious copy of this extension,
+          exposes the vault.</li>
+        <li>An unlock lasts up to 6 hours (or until the browser closes), not 5 minutes of idle
+          time. Lock it when you step away, or turn on "lock when the screen locks".</li>
+        <li>The vault file lives in this browser's own storage. Removing the extension or
+          clearing its data deletes it — keep Google Drive sync on, or export a copy.</li>
+        <li>Two third-party libraries (kdbxweb, hash-wasm) read and write the vault here.</li>
+      </ul>
+      <button id="use-extension" type="button">Use without the desktop app</button>
+    </section>
+
+    <!-- extension mode, no vault yet / adding one -->
+    <section id="view-create" hidden>
+      <h2 id="create-heading">Create a vault</h2>
+      <form id="create-form" autocomplete="off">
+        <label>Profile name <input id="create-name" type="text" maxlength="100" required /></label>
+        <label>Master password (at least 12 characters — a passphrase of several random words is best)
+          <input id="create-password" type="password" minlength="12" required /></label>
+        <label>Repeat the master password <input id="create-repeat" type="password" minlength="12" required /></label>
+        <p class="hint">There is no way to recover a forgotten master password.</p>
+        <div class="row">
+          <button id="create-submit" type="submit">Create vault</button>
+          <button id="create-cancel" type="button" class="plain" hidden>Cancel</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- extension mode, locked -->
+    <section id="view-unlock" hidden>
+      <h2>Unlock</h2>
+      <form id="unlock-form" autocomplete="off">
+        <label>Profile <select id="unlock-profile"></select></label>
+        <label>Master password <input id="unlock-password" type="password" required /></label>
+        <div class="row">
+          <button id="unlock-submit" type="submit">Unlock</button>
+          <button id="new-profile" type="button" class="plain">New profile…</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- extension mode, no profile unlocked: a vault already on Google Drive -->
+    <section id="view-drive" hidden>
+      <details id="drive-open">
+        <summary>Open a vault that is already on Google Drive</summary>
+        <p class="hint">For a vault the desktop app (or another browser) syncs to Google Drive. Set
+          the Google OAuth client ID first (it is asked for below if it is missing).</p>
+        <label id="drive-client-row">Google OAuth client ID
+          <input id="drive-client" type="text" spellcheck="false" /></label>
+        <button id="drive-list" type="button" class="plain">Sign in and list vaults</button>
+        <form id="drive-form" autocomplete="off" hidden>
+          <label>Vault <select id="drive-file"></select></label>
+          <label>Profile name <input id="drive-name" type="text" maxlength="100" /></label>
+          <label>That vault's master password <input id="drive-password" type="password" /></label>
+          <button id="drive-submit" type="submit">Open it here</button>
+        </form>
+      </details>
+    </section>
+
+    <!-- extension mode, unlocked -->
+    <section id="view-vault" hidden>
+      <div class="columns">
+        <div class="main">
+          <div class="row">
+            <input id="search" type="search" placeholder="Search logins" />
+            <button id="add" type="button">Add login</button>
+          </div>
+          <ul id="entries" class="entries"></ul>
+          <form id="entry-form" class="panel" autocomplete="off" hidden>
+            <h2 id="entry-heading">Login</h2>
+            <label>Title <input id="f-title" type="text" maxlength="200" required /></label>
+            <label>Username <input id="f-username" type="text" maxlength="500" /></label>
+            <label>Password
+              <span class="row">
+                <input id="f-password" type="password" maxlength="4096" />
+                <button id="f-show" type="button" class="plain">Show</button>
+                <button id="f-generate" type="button" class="plain">Generate</button>
+                <button id="f-copy" type="button" class="plain">Copy</button>
+              </span>
+            </label>
+            <label>Web addresses (one per line, http or https)
+              <textarea id="f-urls" rows="2"></textarea></label>
+            <label class="check"><input id="f-subdomains" type="checkbox" /> Also fill on subdomains</label>
+            <label>Notes <textarea id="f-notes" rows="3"></textarea></label>
+            <label>Tags (comma separated) <input id="f-tags" type="text" /></label>
+            <div class="row">
+              <button id="f-save" type="submit">Save</button>
+              <button id="f-cancel" type="button" class="plain">Cancel</button>
+              <button id="f-delete" type="button" class="danger" hidden>Delete</button>
+            </div>
+          </form>
+        </div>
+
+        <aside class="side">
+          <div class="panel" id="sync-panel">
+            <h2>Google Drive</h2>
+            <p id="sync-state" class="state"></p>
+            <dl class="facts">
+              <dt>Account</dt><dd id="sync-account">—</dd>
+              <dt>Last successful upload</dt><dd id="sync-last">never</dd>
+              <dt>Latest change</dt><dd id="sync-local">—</dd>
+              <dt>Next try</dt><dd id="sync-retry">—</dd>
+            </dl>
+            <div class="row wrap">
+              <button id="sync-connect" type="button">Connect Google Drive</button>
+              <button id="sync-now" type="button" class="plain" hidden>Sync now</button>
+              <button id="sync-disconnect" type="button" class="plain" hidden>Disconnect</button>
+            </div>
+            <div id="sync-choice" class="row wrap" hidden>
+              <button id="choice-mine" type="button">Keep this computer's copy</button>
+              <button id="choice-theirs" type="button" class="plain">Take the Google Drive copy</button>
+            </div>
+            <div id="sync-missing" class="row wrap" hidden>
+              <button id="choice-upload" type="button">Upload this vault again</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2>Profile</h2>
+            <form id="rename-form" class="row" autocomplete="off">
+              <input id="rename-name" type="text" maxlength="100" />
+              <button type="submit" class="plain">Rename</button>
+            </form>
+            <button id="export" type="button" class="plain">Export encrypted copy (.kdbx)</button>
+            <details>
+              <summary>Delete this profile</summary>
+              <p class="hint">Deletes this profile's vault, backups and sync state from this browser.
+                Type the profile's name to confirm.</p>
+              <form id="delete-form" class="row" autocomplete="off">
+                <input id="delete-name" type="text" />
+                <button type="submit" class="danger">Delete profile</button>
+              </form>
+            </details>
+          </div>
+
+          <div class="panel">
+            <h2>Settings</h2>
+            <form id="settings-form" autocomplete="off">
+              <label>Google OAuth client ID (a "Web application" client)
+                <input id="s-client" type="text" spellcheck="false" /></label>
+              <p class="hint">Authorized redirect URI to register for it: <code id="s-redirect"></code></p>
+              <label class="check"><input id="s-idle" type="checkbox" /> Lock when the screen locks</label>
+              <button type="submit" class="plain">Save settings</button>
+            </form>
+            <button id="use-desktop" type="button" class="plain">Switch back to the desktop app</button>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <script type="module" src="vault.js"></script>
+  </body>
+</html>

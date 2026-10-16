@@ -41,6 +41,9 @@ Built and tested through M5:
   only after you click it, in the top frame only, with exact site matching, and a prompt to
   save or update a login after you sign in
 - **Google Drive sync** of the encrypted file that detects conflicts and keeps both copies
+- **Extension-only mode**: the extension on its own, with the vault kept in the browser and
+  synced to the same Drive files — no desktop app needed, at a security cost spelled out in
+  [docs/setup-browser.md](docs/setup-browser.md#extension-only-mode-no-desktop-app)
 
 Not in v1: TOTP codes, passkeys, attachments, shared vaults, a mobile app, autofill on page
 load, unlocking from the browser, biometrics, breach checks, Firefox and auto-update.

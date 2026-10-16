@@ -2,18 +2,27 @@
   "manifest_version": 3,
   "name": "Personal Vault",
   "version": "0.1.0",
-  "description": "Fill and save logins with your Personal Vault desktop app. It handles a password only when you choose to fill or save one.",
+  "description": "Fill and save logins on any site. Works with the Personal Vault desktop app, or on its own with the vault kept in the browser (extension-only mode).",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4VsWMgnR5CruWQMRFeAlOvhDNd0PEtzXKtY1945/3MmnB0eEegiAxDb4KktOD2+bAnuL6dl2ccr+0i4n79hzFiNLv7G5k1nNexeT1q57YhQ3ovWhbiPpn1qTgVeFo1e8D/5YIVmrqNbh2jYf9Bz3Bo3+H/E2yiJvGb4kIkOz2IrGS1cbboBw/hvpETKqTQOw6sJTWPHkSb7ZfG9NmWdzNzlNhJcXQWzAbQZrUmd6prolvxFzOfMQw9P9Xz/81GuJ72AGDLB0rB/z/0uvYyaXTyJ5XOehNCj99rylX8SMbIirEwm/srTQ1GRQF6Q78xCvo0QTniCCIbGVwM1C0UiQpQIDAQAB",
   "permissions": [
     "nativeMessaging",
     "activeTab",
     "scripting",
-    "storage"
+    "storage",
+    "offscreen",
+    "alarms",
+    "identity"
+  ],
+  "optional_permissions": [
+    "idle"
   ],
   "host_permissions": [
     "http://*/*",
     "https://*/*"
   ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -47,5 +56,13 @@
   "action": {
     "default_popup": "popup.html",
     "default_title": "Personal Vault"
+  },
+  "commands": {
+    "lock-vault": {
+      "suggested_key": {
+        "default": "Alt+Shift+L"
+      },
+      "description": "Lock Personal Vault"
+    }
   }
 }

@@ -187,3 +187,85 @@ only login fields, and only when you focus one or submit one.
 | "Could not list logins: no_match" in the popup | No entry's URL matches this host under the [site matching rules](specs/data-model.md#site-matching-rules) — an `https://` entry never matches an `http://` page, and look-alike hosts (for example `localhost` vs `127.0.0.1`) are different sites. |
 | No save prompt after signing in | Is **Offer to save logins** ticked in the popup? Was the site marked **Never**? Is it plain `http://`, or is the form inside an iframe? Did you type exactly the password already saved? |
 | Nothing happens on Fill | The page may have changed since the menu or the list opened (click the field again or reopen the popup), or the form's fields are hidden — the fill only touches visible fields. |
+
+---
+
+# Extension-only mode (no desktop app)
+
+In this mode the extension is the whole product: your vaults live in this browser, and
+creating, unlocking, editing, filling, generating passwords and Google Drive sync all happen
+here. The desktop app is not needed — it need not even be installed. The decision record is
+proposed ADR-012 in [docs/tasks/EXT-00-extension-only-mode.md](tasks/EXT-00-extension-only-mode.md).
+
+**What you give up compared with the desktop app** — read this first:
+
+- The master password is typed into the browser, and the unlocked vault is held in the
+  browser's memory. A compromised browser, or a malicious copy of this extension, exposes the
+  vault. (With the desktop app, the browser never held either.)
+- An unlock lasts up to **6 hours** or until the browser closes — not 5 minutes of idle
+  time. Lock it when you step away (toolbar popup → Lock, or the shortcut), or turn on
+  "Lock when the screen locks".
+- The vault file lives in the extension's own storage in this browser profile. **Removing
+  the extension, or clearing its data, deletes it.** Keep Google Drive sync on, or export an
+  encrypted copy (vault page → Export).
+- Two third-party libraries read and write the vault in the browser: kdbxweb and hash-wasm
+  (pinned in `extension/vendor/VENDOR.md`).
+
+## 1. Switch the extension to extension-only mode
+
+Load or reload the extension (section 2 or 3 above). Then click its toolbar icon: with no
+desktop app running the popup offers **Use without the desktop app…**, which opens the vault
+page; there, **Use without the desktop app** switches the mode. (The vault page is also at
+`chrome-extension://pkmjgefocdecdncjcpdlohfnahebkkpi/vault.html`.) Switching back later
+(**Settings → Switch back to the desktop app**) locks the vault and keeps it in the browser.
+
+## 2. Create a vault
+
+Profile name and a master password of at least 12 characters (a passphrase of several random
+words is best). There is no way to recover a forgotten master password. Creating takes a few
+seconds: the key-derivation work (Argon2id, 128 MiB) is calibrated to about a second in this
+browser. You can make more profiles (**New profile…** on the unlock screen); each has its own
+vault, master password and Google account, and only one is unlocked at a time.
+
+## 3. Use it
+
+- **Unlock** in the toolbar popup or on the vault page. The in-page menu and the save prompt
+  then work exactly as in section 5.
+- **Lock** with the popup's Lock button, the vault page's Lock button, or the shortcut
+  **Alt+Shift+L** (change it at `chrome://extensions/shortcuts`). Closing the browser locks
+  too, as does reloading or updating the extension.
+- **Lock when the screen locks** (vault page → Settings): the browser asks for the "idle"
+  permission when you tick it.
+
+## 4. Google Drive sync from the extension
+
+The extension uses the same Drive scope (`drive.file`), the same `PersonalVault` folder,
+file name and file tags as the desktop app, so both can use the same vault on Drive.
+
+1. In the same Google Cloud project you use for the desktop app (see
+   [setup-google-drive.md](setup-google-drive.md) for the Drive API and the consent screen,
+   which must be **In production**): APIs & Services → Credentials → **Create credentials →
+   OAuth client ID → Application type: Web application**.
+2. Under **Authorized redirect URIs** add the address the vault page shows under
+   Settings — `https://pkmjgefocdecdncjcpdlohfnahebkkpi.chromiumapp.org/`.
+3. Copy the client ID into vault page → Settings → **Google OAuth client ID**, Save.
+4. With the vault unlocked: **Connect Google Drive**, choose the account. The first sync
+   uploads the vault (or, if this profile already has one on Drive, asks which copy to keep).
+
+No refresh token and no client secret are stored: Google gives the extension an access token
+for about an hour, kept in memory, and renews it without asking while the browser is signed
+in to that Google account. When it cannot, the status says **the sign-in needs renewing** —
+click **Reconnect Google Drive**.
+
+After any change the vault uploads by itself about 10 seconds later; it also checks on
+unlock, every 60 minutes, and when the network comes back. The Google Drive panel on the
+vault page always says what happened: the state and the reason (offline, the sign-in needs
+renewing, Drive full, both copies changed, file missing), when the last successful upload
+was, and whether your latest change is only on this computer. A change is saved in the
+browser first; a failed upload never touches it, and it is retried with backoff.
+
+**A vault the desktop app already syncs:** on the vault page, while nothing is unlocked,
+**Open a vault that is already on Google Drive** → sign in → choose it → type that vault's
+master password. It becomes a profile here with the desktop's profile id, so both keep
+using the same file. Whether your Web client can see files the desktop's client created is
+the one thing not yet checked against real Google (docs/manual-tests.md §14).

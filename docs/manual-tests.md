@@ -236,6 +236,44 @@ Cleanup:
 
 - [ ] 13.16 Stop the `http.server` (Ctrl+C). In the app, delete the `Browser test` profile.
 
+## 14. Extension-only mode (EXT-00) — on a machine without the desktop app
+
+Use a browser profile with no desktop app registration (or a machine where the app is not
+installed), fake logins only, and a **throwaway Google account** for Drive. Follow
+[setup-browser.md](setup-browser.md) "Extension-only mode".
+
+- [ ] 14.1 Load the extension, open the popup: it offers **Use without the desktop app…**.
+      Switch the mode on the vault page; create a profile with a throwaway master password.
+- [ ] 14.2 Add a fake login for a real sign-in page (for example `https://github.com/login`);
+      on that page click the username field: the menu lists it; click it: it fills.
+- [ ] 14.3 Press **Alt+Shift+L**: the vault locks (the popup says Locked; the menu on a
+      password field says Unlock Personal Vault). Unlock from the popup.
+- [ ] 14.4 Close the browser completely and start it again: the vault is locked, the profile
+      is still there, and the master password opens it.
+- [ ] 14.5 Settings → tick **Lock when the screen locks**, accept the permission; lock the OS
+      screen (Win+L) and come back: the vault is locked.
+- [ ] 14.6 Make a Google Cloud **Web application** OAuth client with the redirect URI the vault
+      page shows; put its ID in Settings; **Connect Google Drive** with the throwaway account.
+      The status says Synced. In Brave as well as Chrome (spike S3, question 1).
+- [ ] 14.7 Edit a login; within a minute Drive's `PersonalVault/vault.kdbx` shows a new
+      version (drive.google.com → the file → Manage versions).
+- [ ] 14.8 Turn the network off (airplane mode), edit a login: the Google Drive panel says it
+      cannot reach Drive, the change is only on this computer, and when it tries next. Turn
+      the network on: it uploads without a click.
+- [ ] 14.9 At myaccount.google.com → Security → Third-party access, remove the app's access.
+      Edit a login: the panel says the sign-in needs renewing and never says Synced; the
+      last successful upload time stays. Reconnect: it syncs.
+- [ ] 14.10 On the desktop machine (the app installed), link the same Google account and the
+      same Cloud project (desktop client) to a profile and **take the Drive copy** (ADR-010):
+      the desktop app opens the vault the extension made, with the login from 14.2.
+- [ ] 14.11 The other way (spike S3, question 2): a vault the desktop app uploads — in a
+      fresh browser profile, vault page → **Open a vault that is already on Google Drive**:
+      it is listed, opens with its master password, and edits made in the browser show up in
+      the desktop app after its next sync. If it is not listed, record that: the Web client
+      cannot see the desktop client's files, and the owner decides the fallback.
+- [ ] 14.12 Clean up: delete the profile (vault page → Profile → Delete), remove the Web
+      client and the throwaway account's Drive files.
+
 ## Cleanup
 
 - [ ] Delete the test vault, its backups and the exported files. Do not keep the
