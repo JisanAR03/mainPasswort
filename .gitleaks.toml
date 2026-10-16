@@ -7,7 +7,7 @@
 [extend]
 useDefault = true
 
-[[allowlists]]
+[allowlist]
 description = "the extension manifest's public key, which pins the extension ID"
 regexTarget = "match"
 regexes = [
