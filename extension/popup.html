@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Personal Vault</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Personal Vault</h1>
+      <button id="lock" class="plain" hidden>Lock</button>
+    </header>
+
+    <p id="status" class="status">Checking the desktop app…</p>
+
+    <section id="not-running" hidden>
+      <p>Start the Personal Vault desktop app, then reopen this popup.</p>
+    </section>
+
+    <section id="locked" hidden>
+      <button id="unlock">Unlock in app</button>
+    </section>
+
+    <section id="unpaired" hidden>
+      <p>This browser is not paired with the desktop app yet.</p>
+      <button id="pair">Pair this browser</button>
+      <p id="pair-code" class="code" hidden></p>
+      <p id="pair-hint" class="hint" hidden>
+        Click <strong>Pair</strong> in the desktop app only if it shows this same code.
+      </p>
+    </section>
+
+    <p id="insecure" class="warn" hidden>This page is not secure (http).</p>
+
+    <ul id="matches"></ul>
+
+    <section id="save-prompt" class="prompt" hidden>
+      <p id="save-question"></p>
+      <div class="row">
+        <button id="save-new">Save</button>
+        <button id="save-update" hidden>Update</button>
+        <button id="save-dismiss" class="plain">Dismiss</button>
+      </div>
+    </section>
+
+    <form id="add" autocomplete="off">
+      <h2>Add a login for this site</h2>
+      <input id="add-username" type="text" placeholder="Username" />
+      <div class="row">
+        <input id="add-password" type="password" placeholder="Password" />
+        <button id="add-suggest" type="button" class="plain" title="Generate a password">
+          Suggest
+        </button>
+      </div>
+      <input id="add-title" type="text" placeholder="Title (optional)" />
+      <button id="add-save" type="submit">Save login</button>
+    </form>
+
+    <label id="watch-row" class="watch">
+      <input type="checkbox" id="watch" />
+      Watch for logins to save
+    </label>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

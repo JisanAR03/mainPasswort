@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hostile fields</title>
+    <style>
+      #hidden-field { display: none; }
+      #invisible-field { visibility: hidden; }
+      #transparent-field { opacity: 0; }
+      #zero-field { width: 0; height: 0; padding: 0; border: 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Sign in</h1>
+    <form>
+      <input id="hidden-field" type="password" value="" />
+      <input id="invisible-field" type="password" value="" />
+      <input id="transparent-field" type="password" value="" />
+      <input id="zero-field" type="password" value="" />
+      <label>Username <input id="username" type="text" autocomplete="username" /></label>
+      <label>Password <input id="password" type="password" autocomplete="current-password" /></label>
+      <button type="button">Sign in</button>
+    </form>
+  </body>
+</html>

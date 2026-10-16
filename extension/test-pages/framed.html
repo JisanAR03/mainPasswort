@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Framed page</title>
+  </head>
+  <body>
+    <h1>Sign in</h1>
+    <form>
+      <label>Username <input id="username" type="text" autocomplete="username" /></label>
+      <label>Password <input id="password" type="password" autocomplete="current-password" /></label>
+      <button type="button">Sign in</button>
+    </form>
+    <!-- Cross-origin: the test loads this page under one hostname and the
+         iframe under another. The fill must touch frame 0 only. -->
+    <iframe id="frame" src="" width="400" height="200"></iframe>
+    <script>
+      const other = new URL(location.href);
+      other.hostname = other.hostname === "localhost" ? "127.0.0.1" : "localhost";
+      other.pathname = "/framed-login.html";
+      document.getElementById("frame").src = other.toString();
+    </script>
+  </body>
+</html>
