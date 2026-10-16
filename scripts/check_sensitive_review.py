@@ -29,6 +29,9 @@ SENSITIVE_FILES = {
     "extension/fill.js",
     "extension/detect.js",
     "extension/background.js",
+    "extension/inline.js",
+    "extension/menu.js",
+    "extension/prompt.js",
 }
 
 TRAILER = "Security-Reviewed-By:"

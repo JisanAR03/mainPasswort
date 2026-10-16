@@ -1,0 +1,150 @@
+/* The in-page menu and prompt (menu.html, prompt.html). */
+:root {
+  color-scheme: light dark;
+  --ink: #1c1c1e;
+  --muted: #6b6b70;
+  --line: #d9d9de;
+  --surface: #ffffff;
+  --hover: #eef5f0;
+  --accent: #2f6f4f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f2f2f4;
+    --muted: #a5a5ab;
+    --line: #3a3a3f;
+    --surface: #1f1f22;
+    --hover: #24322a;
+    --accent: #3f9169;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: 13px/1.4 system-ui, sans-serif;
+}
+
+body {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-sizing: border-box;
+  min-height: 100vh;
+  overflow: hidden auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+#menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+#menu button:hover,
+#menu button:focus {
+  background: var(--hover);
+  outline: none;
+}
+
+.title {
+  display: block;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail {
+  display: block;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message {
+  margin: 8px 10px;
+  color: var(--muted);
+}
+
+.warn {
+  margin: 6px 10px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: #fff4d6;
+  color: #5a4610;
+}
+
+.question {
+  margin: 10px 12px 2px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.login {
+  margin: 0 12px 10px;
+}
+
+.login .site {
+  font-weight: 600;
+}
+
+.login .detail {
+  display: inline;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  padding: 0 12px 10px;
+  flex-wrap: wrap;
+}
+
+.actions button,
+.close {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.close {
+  border: 0;
+  padding: 0 4px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

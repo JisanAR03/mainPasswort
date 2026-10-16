@@ -40,6 +40,18 @@ and no outside security review has been done. Each milestone below has a card in
 
 ### Fixed
 
+- The browser extension now does its job on login pages (2026-10-16). Before, nothing ever
+  appeared in a page: filling needed the toolbar popup, and a submitted login only set a badge
+  on the toolbar icon — and only after "Watch for logins" was turned on — while sites that
+  sign in without submitting a form, and two-step logins, were never noticed at all. The
+  extension now opens a menu under login fields with the site's saved logins (fill on click,
+  "Unlock" when the vault is locked), and after you sign in shows a "Save this login?" /
+  "Update saved password?" prompt in the page with Save, Not now and Never for this site. It
+  notices form submits, Enter, and sign-in button clicks (fetch logins), and pairs a two-step
+  login's username with its password. The popup's update offer now targets only the saved
+  login with the same username. Site access to `http`/`https` pages is declared in the
+  manifest rather than optional, because the menu and the prompt need every site. Details and
+  the evidence in [docs/tasks/fix-extension-inline-fill-save.md](docs/tasks/fix-extension-inline-fill-save.md).
 - The first unlock of a new profile creates its vault (2026-10-16). "New profile" writes the
   name into `profiles.json` and nothing else, and no code path ever made the vault file: every
   profile was unopenable, and the unlock window answered "the vault file is damaged and could

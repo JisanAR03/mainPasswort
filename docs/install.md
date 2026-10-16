@@ -108,6 +108,9 @@ running the script there would need `uv` (which is the whole point of the packag
    reg add "HKCU\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.personalvault.host" /ve /t REG_SZ /d "<absolute path to the .json>" /f
    ```
 
+   Brave on Windows reads the first (Chrome's) key, not the second — the Chrome key is
+   needed even on a machine with only Brave ([setup-browser.md](setup-browser.md) step 1).
+
    On Linux, the same JSON goes to
    `~/.config/google-chrome/NativeMessagingHosts/com.personalvault.host.json` (and the Brave
    twin), and `launcher.sh` replaces the `.bat`.
@@ -115,7 +118,7 @@ running the script there would need `uv` (which is the whole point of the packag
 `allowed_origins` names this project's extension ID, which `manifest.json`'s key pins; a
 different ID in the address bar means Chrome loaded a different folder and the host will
 refuse it. Everything downstream — loading the extension, pairing, the settings in
-[setup-browser.md](setup-browser.md) steps 5 and 6 — is the same in both cases.
+[setup-browser.md](setup-browser.md) sections 5 to 7 — is the same in both cases.
 **Restart the browser afterwards**: Chrome and Brave read the native-host registration once,
 at startup.
 

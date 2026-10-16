@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Sign in (form built by JavaScript)</title>
+  </head>
+  <body>
+    <h1>Sign in</h1>
+    <div id="mount">Loading…</div>
+    <script>
+      // The form does not exist when the page loads: it is built a moment
+      // later, the way framework-rendered login pages appear. Submitting it is
+      // handled by script (preventDefault, then a redirect), as a site that
+      // posts with fetch and then navigates would.
+      setTimeout(() => {
+        const form = document.createElement("form");
+        form.id = "login";
+        form.innerHTML = `
+          <label>Email <input id="username" name="email" type="email" /></label>
+          <label>Password <input id="password" name="password" type="password" /></label>
+          <button id="submit" type="submit">Log in</button>`;
+        form.addEventListener("submit", (event) => {
+          event.preventDefault();
+          location.href = "welcome.html";
+        });
+        document.getElementById("mount").replaceChildren(form);
+      }, 300);
+    </script>
+  </body>
+</html>

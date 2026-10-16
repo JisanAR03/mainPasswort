@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Sign in (form inside an iframe)</title>
+  </head>
+  <body>
+    <h1>Sign in</h1>
+    <!-- The only login form on this page is inside the iframe. By default the
+         frame is cross-origin (the other of localhost / 127.0.0.1); with
+         ?same=1 it is same-origin. The extension works in the top frame only. -->
+    <iframe id="frame" src="" width="420" height="220"></iframe>
+    <script>
+      const url = new URL(location.href);
+      if (url.searchParams.get("same") !== "1") {
+        url.hostname = url.hostname === "localhost" ? "127.0.0.1" : "localhost";
+      }
+      url.pathname = url.pathname.replace(/[^/]*$/, "framed-login.html");
+      url.search = "";
+      document.getElementById("frame").src = url.toString();
+    </script>
+  </body>
+</html>

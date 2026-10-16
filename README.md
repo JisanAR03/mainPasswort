@@ -37,13 +37,13 @@ Built and tested through M5:
 - Manual lock, idle auto-lock, lock on sleep, and clipboard auto-clear
 - Safe saves with a read-back check and rotating encrypted backups
 - A minimal **desktop app** (PySide6)
-- A **browser extension** for Chrome and Brave that fills a login only after you click it,
-  in the top frame only, with exact site matching
+- A **browser extension** for Chrome and Brave: a menu on login fields that fills a login
+  only after you click it, in the top frame only, with exact site matching, and a prompt to
+  save or update a login after you sign in
 - **Google Drive sync** of the encrypted file that detects conflicts and keeps both copies
 
-Not in v1: TOTP codes, passkeys, attachments, shared vaults, a mobile app, in-page autofill
-dropdowns, autofill on page load, unlocking from the browser, biometrics, breach checks,
-Firefox and auto-update.
+Not in v1: TOTP codes, passkeys, attachments, shared vaults, a mobile app, autofill on page
+load, unlocking from the browser, biometrics, breach checks, Firefox and auto-update.
 
 ## Tech stack
 

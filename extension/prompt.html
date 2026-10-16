@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Personal Vault</title>
+    <link rel="stylesheet" href="frames.css" />
+  </head>
+  <body class="prompt">
+    <header class="brand">
+      Personal Vault
+      <button id="close" type="button" class="close" aria-label="Not now">×</button>
+    </header>
+    <p id="question" class="question"></p>
+    <p class="login"><span id="site" class="site"></span> <span id="username" class="detail"></span></p>
+    <div id="actions" class="actions">
+      <button id="save" type="button" class="primary"></button>
+      <button id="later" type="button">Not now</button>
+      <button id="never" type="button">Never for this site</button>
+    </div>
+    <p id="message" class="message" hidden></p>
+    <script type="module" src="prompt.js"></script>
+  </body>
+</html>
