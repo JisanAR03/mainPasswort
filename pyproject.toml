@@ -62,7 +62,9 @@ mypy_path = "app/src"
 files = ["app/src/personal_vault"]
 
 [[tool.mypy.overrides]]
-module = ["pykeepass", "pykeepass.*"]
+# pykeepass and google-auth-oauthlib ship no py.typed marker, so mypy cannot
+# check calls into them at all (google-auth itself is typed and is checked)
+module = ["pykeepass", "pykeepass.*", "google_auth_oauthlib.*"]
 ignore_missing_imports = true
 
 [tool.bandit]

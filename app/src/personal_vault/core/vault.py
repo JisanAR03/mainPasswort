@@ -312,6 +312,42 @@ class VaultSession:
             keep_daily=self._keep_daily,
         )
 
+    # --- the files a sync may swap under us (M5) ---------------------------
+
+    def opens_with_this_password(self, path: str | Path) -> bool:
+        """Does ``path`` decrypt with this session's master password? (I7.)
+
+        The sync engine asks this before it adopts anything and before it sends
+        anything, so no file can reach Drive, and no file can replace the
+        vault, unless the password this session holds opens it.
+        """
+        password = self._password
+        if password is None:
+            return False
+        try:
+            open_vault(Path(path), password)
+        except (VaultError, OSError):
+            return False
+        return True
+
+    def reopen(self, path: str | Path | None = None) -> VaultSession:
+        """Open a vault file with this session's master password.
+
+        This session's own file by default: a sync adopted a newer copy from
+        Drive, so the caller needs a session over the file that is there now.
+        Given another path, it opens a copy to be read and never saved.
+        """
+        password = self._password
+        if password is None:
+            raise VaultError("vault is closed")
+        return VaultSession.open(
+            self.path if path is None else path,
+            password,
+            self.backups_dir,
+            keep_recent=self._keep_recent,
+            keep_daily=self._keep_daily,
+        )
+
     # --- entries -----------------------------------------------------------
 
     def _logins_group(self) -> Any:
@@ -422,23 +458,39 @@ class VaultSession:
             group = kp.add_group(kp.root_group, APP_GROUP)
         return group
 
+    def _app_entry(self, name: str) -> Any:
+        return next((e for e in self._app_group().entries if e.title == name), None)
+
     def get_app_value(self, name: str) -> str | None:
         """Read a value the app stores for itself (pairing key, sync token)."""
-        for entry in self._app_group().entries:
-            if entry.title == name:
-                return entry.password or None
-        return None
+        entry = self._app_entry(name)
+        return (entry.password or None) if entry is not None else None
 
-    def set_app_value(self, name: str, value: str) -> None:
+    def get_app_username(self, name: str) -> str | None:
+        """Read the label beside an app value (the Drive account's email)."""
+        entry = self._app_entry(name)
+        return (entry.username or None) if entry is not None else None
+
+    def set_app_value(self, name: str, value: str, *, username: str | None = None) -> None:
         """Store an app value in the hidden .app group; KeePassXC shows a note."""
-        entry = next((e for e in self._app_group().entries if e.title == name), None)
+        entry = self._app_entry(name)
         if entry is None:
             entry = self._open_kp.add_entry(
-                self._app_group(), title=name, username="", password=value
+                self._app_group(), title=name, username=username or "", password=value
             )
             entry.notes = "Managed by Personal Vault - do not edit"
         else:
             entry.password = value
+            if username is not None:
+                entry.username = username
+
+    def delete_app_entry(self, name: str) -> bool:
+        """Remove an app entry for good (disconnect must not leave a token behind)."""
+        entry = self._app_entry(name)
+        if entry is None:
+            return False
+        self._open_kp.delete_entry(entry)
+        return True
 
     @staticmethod
     def _hosts(urls: list[str]) -> list[str]:
