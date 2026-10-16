@@ -69,6 +69,17 @@ def _write(stream: IO[bytes], raw: bytes) -> None:
     stream.flush()
 
 
+def _receive_reply(app: IO[bytes]) -> bytes | None:
+    """The app's reply body, or None when the app closed the socket."""
+    header = _read_exact(app, 4)
+    if header is None:
+        return None
+    (reply_length,) = struct.unpack("=I", header)
+    if reply_length > MAX_REPLY_BYTES:
+        return None
+    return _read_exact(app, reply_length)
+
+
 def _relay(stdin: IO[bytes], stdout: IO[bytes]) -> int:
     app: IO[bytes] | None = None
     while True:
@@ -85,25 +96,26 @@ def _relay(stdin: IO[bytes], stdout: IO[bytes]) -> int:
         body = _read_exact(stdin, length)
         if body is None:
             return 0
-        if app is None:
+        reply_body: bytes | None = None
+        # two attempts at most, and the second only when nothing was sent:
+        # a request the app already answered (or may have applied) is never
+        # resent, so a save can't be applied twice
+        for _ in (1, 2):
+            if app is None:
+                try:
+                    app = _connect()
+                except OSError:
+                    break  # the app is not running
             try:
-                app = _connect()
+                _write(app, frame(body))
             except OSError:
-                _write(stdout, frame(reply("", ok=False, error_code="app_not_running")))
+                app = None  # the app's socket is stale; retry on a fresh one
                 continue
-        try:
-            _write(app, frame(body))
-            header = _read_exact(app, 4)
-            if header is None:
-                raise OSError("the app closed the socket")
-            (reply_length,) = struct.unpack("=I", header)
-            if reply_length > MAX_REPLY_BYTES:
-                raise OSError("reply exceeds the protocol cap")
-            reply_body = _read_exact(app, reply_length)
+            reply_body = _receive_reply(app)
             if reply_body is None:
-                raise OSError("the app closed the socket mid-reply")
-        except OSError:
-            app = None  # the app went away; reconnect for the next request
+                app = None  # the app died mid-request; never resend blindly
+            break
+        if reply_body is None:
             _write(stdout, frame(reply("", ok=False, error_code="app_not_running")))
             continue
         # the app's framing is transport-level: stdio carries one frame holding
