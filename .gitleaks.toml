@@ -1,15 +1,26 @@
 # gitleaks reads the extension manifest's "key" as a generic API key. It is a
 # public key: it only pins the extension ID the native-host registration names,
-# and it is meant to be in the repository. The allowlist matches that one value
-# and nothing else, so any other secret, in that file or any other, is still
-# reported.
+# and it is meant to be in the repository. The first allowlist matches that one
+# value and nothing else, so any other secret, in that file or any other, is
+# still reported.
+#
+# The second allowlist is one line of the vendored kdbxweb.js: gitleaks reads
+# `this.keyEncryptionRounds = consts_1.Defaults.KeyEncryptionRounds;` (a number of
+# AES-KDF rounds, not a key) as a generic API key. The file is byte-pinned by
+# scripts/check_vendor.py, and only that exact line is excused.
 
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "the extension manifest's public key, which pins the extension ID"
 regexTarget = "match"
 regexes = [
   'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4VsWMgnR5CruWQMRFeAlOvhDNd0PEtzXKtY1945',
 ]
+
+[[allowlists]]
+description = "a KDF round count in the vendored kdbxweb.js, not a secret"
+paths = ['''extension/vendor/kdbxweb\.js''']
+regexTarget = "match"
+regexes = ['''this\.keyEncryptionRounds = consts_1\.Defaults\.KeyEncryptionRounds''']
