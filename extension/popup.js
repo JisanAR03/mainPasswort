@@ -60,16 +60,16 @@ async function renderPending() {
   const { result: candidate } = await send("pending_save");
   show("save-prompt", Boolean(candidate));
   if (!candidate) return;
-  const host = new URL(candidate.url).hostname;
-  $("save-question").textContent = `Save the login for ${host}?`;
+  // the service worker has already decided: a new login, or a changed
+  // password for the saved login with that same username
+  const isUpdate = candidate.kind === "update";
+  $("save-question").textContent = isUpdate
+    ? `Update the saved password for ${candidate.site}?`
+    : `Save the login for ${candidate.site}?`;
+  show("save-new", !isUpdate);
   const update = $("save-update");
-  if (matches.length > 0) {
-    update.hidden = false;
-    update.textContent = `Update ${matches[0].title}`;
-    update.dataset.entryId = matches[0].id;
-  } else {
-    update.hidden = true;
-  }
+  update.hidden = !isUpdate;
+  if (isUpdate) update.textContent = `Update ${candidate.title}`;
 }
 
 async function refresh() {
@@ -174,10 +174,7 @@ $("save-new").addEventListener("click", async () => {
 });
 
 $("save-update").addEventListener("click", async () => {
-  const reply = await send("resolve_save", {
-    action: "update",
-    entryId: $("save-update").dataset.entryId,
-  });
+  const reply = await send("resolve_save", { action: "update" });
   setStatus(reply.ok ? "Updated." : `Could not update: ${reply.error.code}`);
   await renderPending();
 });
@@ -188,22 +185,15 @@ $("save-dismiss").addEventListener("click", async () => {
 });
 
 $("watch").addEventListener("change", async () => {
-  if ($("watch").checked) {
-    // the permission request must come from this click, so it happens here
-    const granted = await chrome.permissions.request({ origins: ["<all_urls>"] });
-    await send(granted ? "watch_on" : "watch_off");
-    $("watch").checked = granted;
-    setStatus(granted ? "Watching for logins to save." : "All-sites access was not granted.");
-  } else {
-    await send("watch_off");
-    setStatus("Stopped watching for logins.");
-  }
+  const offer = $("watch").checked;
+  await send("set_offer_to_save", { value: offer });
+  setStatus(offer ? "Will offer to save logins you submit." : "Will not offer to save logins.");
 });
 
 async function initWatchToggle() {
-  const { watch_logins: wanted } = await store.get("watch_logins");
-  const granted = await chrome.permissions.contains({ origins: ["<all_urls>"] });
-  $("watch").checked = Boolean(wanted) && granted;
+  // on unless you turned it off
+  const { offer_to_save: offer } = await store.get("offer_to_save");
+  $("watch").checked = offer !== false;
 }
 
 initWatchToggle();

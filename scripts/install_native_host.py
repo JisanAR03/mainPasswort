@@ -4,7 +4,10 @@ Writes the host launcher and manifest under ``extension/native-host/``
 (git-ignored) and registers the manifest path where the browsers look:
 
 - Windows: ``HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.personalvault.host``
-  and the same under ``BraveSoftware\\Brave-Browser``
+  and the same under ``BraveSoftware\\Brave-Browser``. Brave on Windows reads the
+  Chrome key, not its own (checked with Brave 1.97, 2026-10-16), so the Chrome key
+  is the one both browsers need; the Brave key is written in case a later Brave
+  reads it.
 - Linux: ``~/.config/google-chrome/NativeMessagingHosts/com.personalvault.host.json``
   and ``~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/``
 

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Sign in (two steps)</title>
+  </head>
+  <body>
+    <h1>Sign in</h1>
+    <div id="step"></div>
+    <script>
+      // Username on one screen, password on the next, in one page and with no
+      // reload: the username field is gone by the time the password is typed.
+      const step = document.getElementById("step");
+
+      function showUsername() {
+        step.innerHTML = `
+          <label>Username <input id="username" type="text" autocomplete="username" /></label>
+          <button id="next" type="button">Next</button>`;
+        document.getElementById("next").addEventListener("click", showPassword);
+      }
+
+      function showPassword() {
+        const who = document.getElementById("username").value;
+        step.innerHTML = `
+          <p id="who"></p>
+          <label>Password <input id="password" type="password" autocomplete="current-password" /></label>
+          <button id="submit" type="button">Sign in</button>`;
+        document.getElementById("who").textContent = who;
+        document.getElementById("submit").addEventListener("click", async () => {
+          await fetch("welcome.html");
+          history.pushState({}, "", "#signed-in");
+          step.innerHTML = '<p id="done">Signed in.</p>';
+        });
+      }
+
+      showUsername();
+    </script>
+  </body>
+</html>

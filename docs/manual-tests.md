@@ -172,6 +172,70 @@ so nothing here can reach a real vault.
       opens in KeePassXC with the throwaway password — deleting the app does not delete the
       vault.
 
+## 13. Browser: fill and save in the page (Chrome and Brave)
+
+Run it once in each browser. Use a **throwaway profile** and fake logins only: in the desktop
+app create a profile named `Browser test` with a throwaway master password, and never type a
+real password into any page during this section.
+
+Setup:
+
+- [ ] 13.1 Load or reload the extension: `chrome://extensions` (Brave: `brave://extensions`),
+      Developer mode on. If Personal Vault is listed, click its reload arrow; if not, **Load
+      unpacked** → this repository's `extension` folder. In its **Details**, *Site access*
+      reads **On all sites**. Pin it (puzzle icon → pin). **Reload any tab that was already
+      open.**
+- [ ] 13.2 Turn off the browser's own password saving and other managers —
+      [setup-browser.md](setup-browser.md) section 6.
+- [ ] 13.3 Start the desktop app, open `Browser test`, unlock. Click the toolbar icon →
+      **Pair this browser** → click **Pair** in the app only if the codes match.
+- [ ] 13.4 In a terminal in this repository, serve the test pages:
+      `uv run python -m http.server 8765 --bind 127.0.0.1 --directory extension/test-pages`
+
+Save, fill, update:
+
+- [ ] 13.5 Open `http://127.0.0.1:8765/login.html`. Click into Username: no menu (the vault
+      has nothing for this site yet). Type `alice@example.com` and `fake-pass-1`, click
+      **Sign in**. A prompt in the top-right corner asks **Save this login?** and shows
+      `127.0.0.1:8765` and `alice@example.com` — no password. Click **Save**: it says "Saved to
+      Personal Vault." and closes. The app's entry list now has `127.0.0.1:8765`.
+- [ ] 13.6 Open `login.html` again and click into Username. A Personal Vault menu opens under
+      it with `127.0.0.1:8765` / `alice@example.com`. Click it: both fields are filled, and the
+      page is not submitted (the address does not change).
+- [ ] 13.7 The same menu and fill work on `spa.html` (no form), `js-form.html` (wait for the
+      form to appear) and `multi-step.html` (the menu fills the username; click **Next**;
+      click the password field; the menu fills the password).
+- [ ] 13.8 On `login.html` sign in with `alice@example.com` and `fake-pass-2`. The prompt asks
+      **Update saved password?** with **Update 127.0.0.1:8765**. Click it. In the app the
+      entry's password is now `fake-pass-2`.
+- [ ] 13.9 Sign in again with `fake-pass-2`: no prompt (it is the saved password).
+- [ ] 13.10 Sign in as `bob@example.com` / `fake-pass-3` and click **Not now**: nothing is
+      saved. Then open `http://localhost:8765/login.html` (a different site), sign in as
+      `bob@example.com`, click **Never for this site**, and sign in there once more: no prompt.
+
+Locked, not running, iframes:
+
+- [ ] 13.11 Lock the app. On `login.html` click the Password field: the menu says **Unlock
+      Personal Vault**. Click it: the app's window comes forward. Unlock, click the field
+      again: the menu lists the login.
+- [ ] 13.12 Lock the app, then sign in on `login.html` as `carol@example.com` /
+      `fake-pass-4`. The prompt says the vault is locked. Click **Save**: the app comes forward.
+      Unlock, click **Save** again: saved.
+- [ ] 13.13 Quit the app. Click the Password field: the menu says to start the desktop app.
+- [ ] 13.14 Open `iframe-login.html`: clicking the fields inside the frame shows no menu, and
+      signing in there shows no prompt (the extension works in the top frame only).
+
+A real site, detection only:
+
+- [ ] 13.15 With the app running and unlocked, open a real sign-in page (for example
+      `https://github.com/login`). Type a **made-up** email and a **made-up** password and
+      click Sign in. The site rejects it, and the prompt still asks to save it — the extension
+      cannot tell a failed sign-in. Click **Not now**. Never use a real password here.
+
+Cleanup:
+
+- [ ] 13.16 Stop the `http.server` (Ctrl+C). In the app, delete the `Browser test` profile.
+
 ## Cleanup
 
 - [ ] Delete the test vault, its backups and the exported files. Do not keep the

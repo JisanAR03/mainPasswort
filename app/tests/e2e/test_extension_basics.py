@@ -25,9 +25,14 @@ pytestmark = pytest.mark.e2e
 BridgeFactory = Callable[..., Bridge]
 
 
-def test_shipped_manifest_stays_minimal() -> None:
-    """No host permissions are granted at install time; all-sites is optional."""
+def test_shipped_manifest_asks_only_for_what_the_page_features_need() -> None:
+    """Web pages only (http and https, no file:// or other schemes), the two
+    content scripts in the top frame only, and nothing a web page can load but
+    the two frame pages. Site access is declared rather than optional because
+    the suggestion menu and the save prompt work on every site from install
+    (docs/tasks/fix-extension-inline-fill-save.md)."""
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    web = ["http://*/*", "https://*/*"]
     assert manifest["manifest_version"] == 3
     assert sorted(manifest["permissions"]) == [
         "activeTab",
@@ -35,8 +40,19 @@ def test_shipped_manifest_stays_minimal() -> None:
         "scripting",
         "storage",
     ]
-    assert "host_permissions" not in manifest
-    assert manifest["optional_host_permissions"] == ["<all_urls>"]
+    assert manifest["host_permissions"] == web
+    assert "optional_host_permissions" not in manifest
+    assert manifest["content_scripts"] == [
+        {
+            "matches": web,
+            "js": ["detect.js", "inline.js"],
+            "run_at": "document_end",
+            "all_frames": False,
+        }
+    ]
+    assert manifest["web_accessible_resources"] == [
+        {"resources": ["menu.html", "prompt.html"], "matches": web}
+    ]
     assert "key" in manifest, "the ID must stay pinned for the native-host registration"
 
 

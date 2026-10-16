@@ -40,8 +40,9 @@ These are limits of the design, not bugs waiting to be fixed:
 ## Not in this version
 
 TOTP codes, passkeys, attachments, shared or team vaults, a mobile app, autofill on page
-load, an in-page dropdown, unlocking from the browser, biometrics, breach checks, Firefox,
-and auto-update. The browser extension fills only the top frame, and only when you click it.
+load, unlocking from the browser, biometrics, breach checks, Firefox, and auto-update. The
+browser extension fills only the top frame, and only when you click a login in its menu or
+popup; logins inside iframes get no menu and are never offered for saving.
 
 ## Behaviour that is deliberate but will surprise you
 
@@ -66,9 +67,13 @@ and auto-update. The browser extension fills only the top frame, and only when y
   with it. Everything that leaves as a *copy* leaves them behind — a merge never carries them
   to another vault, a CSV export never contains them, and since M6 the encrypted KDBX export
   drops the `.app` group too (it did not before; M6-03 found it).
-- **`<all_urls>` is requested for save detection.** The extension asks for it only when you
-  turn watch-for-saves on, and drops it when you turn it off, but while it is on the extension
-  can read the address of every page you visit.
+- **The extension can read every `http` and `https` page you visit.** It needs that to find
+  login fields and notice sign-ins, and asks for it when it is installed. It reads only login
+  fields, only when you focus or submit one, and sends the page's address to the desktop app
+  (on this machine) only then.
+- **A failed sign-in can be offered for saving.** The extension cannot tell whether the site
+  accepted the password, so after a wrong password the prompt may still ask; choose
+  **Not now**.
 - **There is no installer.** M6-04 builds a folder you copy (`docs/install.md`), not a
   `.msi`/`.deb`; it is not code-signed, so Windows SmartScreen warns on first run ("More
   info → Run anyway"), and nothing updates itself — replacing the folder is the update. A
