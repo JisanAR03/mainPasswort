@@ -126,6 +126,28 @@ endpoints) and `oauth2.googleapis.com/token`, both in `sync/drive_client.py` and
 `sync/oauth.py`. The browser extension talks only to the native host
 (`connectNative`) — `grep -rn "console\." extension/*.js` finds no logging in it at all.
 
+## Found while auditing: an export carries the Drive token
+
+Not a leak found by a grep but by following the token to its file. `save_google_account`
+stores the Drive refresh token in the vault's hidden `.app` group
+(`services.py:300` → `set_app_value`), and `export_kdbx` (`core/vault.py:285`) writes its copy
+by opening the vault and re-saving it under the new password — so the exported file contains
+`.app` and therefore the token, and the pairing key with it.
+
+- CSV export is not affected: `export_csv` writes the Logins group only.
+- Merge is not affected: `merge_side()` leaves `.app` out, so no merge moves a token.
+- The spec is not contradicted: data-model.md says "the default export is an encrypted KDBX
+  copy", and a copy is what it is. The spec simply never considered app values.
+
+**Decision for the owner, not taken here.** The one-line fix is to drop the `.app` group from
+the copy before saving it (and to say so in the export dialog). The cost is real: someone who
+exports a vault and then uses the export as their main vault would have to link Drive and pair
+the extension again, because the export no longer carries the key. Since M2-08 was accepted
+with this export behaviour, changing it is the owner's call — and it is a change to an `[S]`
+file, so it needs a review trailer either way. Until then,
+[docs/known-limitations.md](../known-limitations.md) states it plainly, and this card records
+it so it cannot be lost.
+
 ## Acceptance tests
 
 - [x] each of the four audits answered with a command and its output (above)
@@ -136,6 +158,8 @@ endpoints) and `oauth2.googleapis.com/token`, both in `sync/drive_client.py` and
       and M6-02 were committed)
 - [ ] the owner re-runs `uv run pip-audit` and `gitleaks detect --source . --config .gitleaks.toml`
       on `main` at release time — M6's "Done when" line is theirs
+- [ ] the owner decides the KDBX export's `.app` group (above). Recorded, documented, and left
+      alone until they do
 
 ## Out of scope
 

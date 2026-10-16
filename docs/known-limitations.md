@@ -60,8 +60,13 @@ and auto-update. The browser extension fills only the top frame, and only when y
   covers the Logins group and its deletions — not attachments, not the hidden `.app` group,
   and not more than two copies at once.
 - **The vault file holds the app's own secrets.** The pairing key the extension uses and the
-  Google Drive token live in the hidden `.app` group inside the vault, so anyone who can open
-  the vault can also drive that Drive account. They are excluded from exports and from merges.
+  Google Drive refresh token live in the hidden `.app` group inside the vault, so anyone who
+  can open the vault can also drive that Drive account. A merge never carries them to another
+  vault, and a CSV export never contains them — but **an encrypted KDBX export does**, because
+  that export is a copy of the vault file, and whoever opens it can read the token. So do not
+  give an export of a linked vault to anyone you would not give that Drive access to. Whether
+  the export should keep stripping them is an open decision (M6-03's card, "Found while
+  auditing").
 - **`<all_urls>` is requested for save detection.** The extension asks for it only when you
   turn watch-for-saves on, and drops it when you turn it off, but while it is on the extension
   can read the address of every page you visit.
