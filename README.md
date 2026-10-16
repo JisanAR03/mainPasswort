@@ -3,10 +3,11 @@
 A personal, local-first password manager for the desktop, with a browser extension and
 optional Google Drive sync. The design spec calls it **Personal Vault**.
 
-> **Status: M0–M5 merged, M6 in progress (2026-10-16).** The desktop app, the browser
-> extension and Drive sync are built and covered by the test suite. Gates **G2** (a signed
-> `[S]` read-through) and **G4** (the two-device Drive test) are still open, so do not put a
-> real password in it yet, and do not turn sync on for a real vault. See
+> **Status: M0–M6 complete (2026-10-16).** The desktop app, the browser extension, Drive
+> sync, the two-sided conflict merge, the hardening audit and the packaged build are all in,
+> with an install and update guide in [docs/install.md](docs/install.md). Gates **G2** (a
+> signed `[S]` read-through) and **G4** (the two-device Drive test) are still open, so do not
+> put a real password in it yet, and do not turn sync on for a real vault. See
 > [Known limitations](docs/known-limitations.md) before you trust it with anything.
 
 ## Security limits: read this first
@@ -81,6 +82,9 @@ Development and test runs must always set `PV_DATA_DIR` to a throwaway folder (s
 `.env.example`), so they never touch a real vault. Real passwords go into the app only after
 gate G2.
 
+To run it without a checkout — a folder you copy to another machine — build the packaged app:
+[docs/install.md](docs/install.md).
+
 The browser extension and Drive sync each have their own setup:
 [docs/setup-browser.md](docs/setup-browser.md) and
 [docs/setup-google-drive.md](docs/setup-google-drive.md).
@@ -100,6 +104,7 @@ The browser extension and Drive sync each have their own setup:
 | [Known limitations](docs/known-limitations.md) | What it does not do, does not protect against, and has not had checked |
 | [Recovery](docs/recovery.md) | Getting a vault back: local backup, Drive revision, KeePassXC |
 | [Manual tests](docs/manual-tests.md) | The owner's test script (gate G2) and the recovery drill (G5) |
+| [Install and update](docs/install.md) | Building the app into a folder that runs without Python, and replacing it |
 | [Task cards](docs/tasks/) | One card per task: what was built, and what proves it |
 
 ## License

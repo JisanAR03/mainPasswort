@@ -4,8 +4,9 @@ The extension is a thin remote control for the desktop app: it lists the logins 
 the tab you are on and fills one when you click. It stores no vault data, and it never sees
 a password except the one you just clicked to fill.
 
-Until packaging (M6), you load the extension from the repository folder. Chrome and Brave
-both do this, and both take the same native host.
+The extension is loaded unpacked from the repository folder — there is no published
+extension, packaged or otherwise (M6-04 packaged the desktop app only). Chrome and Brave both
+do this, and both take the same native host.
 
 > The desktop app must be running. If it is not, the popup says "The desktop app is not
 > running." and does nothing else — that is by design, not a fault.
@@ -29,6 +30,17 @@ It writes the host files under `extension/native-host/` (git-ignored) and regist
 The host launcher runs the app's package straight out of this repository, so the install
 must be repeated if you move the folder. **Restart the browser afterwards**: Chrome and
 Brave read the native-host registration once, at startup.
+
+On a machine running the packaged build (M6-04) rather than a checkout there is no `uv run`
+to start, so register the packaged host instead — same script, one option, on a machine that
+still has `uv`:
+
+```
+uv run python scripts/install_native_host.py --host-exe "%LOCALAPPDATA%\Programs\PersonalVault\personal-vault-host.exe"
+```
+
+On the fresh machine that has only the copied folder, [install.md](install.md) gives the same
+three files by hand (launcher, manifest, registry value), which needs no Python at all.
 
 ## 2. Load the extension (Chrome)
 

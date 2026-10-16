@@ -61,17 +61,22 @@ and auto-update. The browser extension fills only the top frame, and only when y
   and not more than two copies at once.
 - **The vault file holds the app's own secrets.** The pairing key the extension uses and the
   Google Drive refresh token live in the hidden `.app` group inside the vault, so anyone who
-  can open the vault can also drive that Drive account. A merge never carries them to another
-  vault, and a CSV export never contains them — but **an encrypted KDBX export does**, because
-  that export is a copy of the vault file, and whoever opens it can read the token. So do not
-  give an export of a linked vault to anyone you would not give that Drive access to. Whether
-  the export should keep stripping them is an open decision (M6-03's card, "Found while
-  auditing").
+  can open the vault can also drive that Drive account. One consequence is deliberate: if you
+  move the vault file itself (a by-hand restore, or Dropbox instead of Drive) the link comes
+  with it. Everything that leaves as a *copy* leaves them behind — a merge never carries them
+  to another vault, a CSV export never contains them, and since M6 the encrypted KDBX export
+  drops the `.app` group too (it did not before; M6-03 found it).
 - **`<all_urls>` is requested for save detection.** The extension asks for it only when you
   turn watch-for-saves on, and drops it when you turn it off, but while it is on the extension
   can read the address of every page you visit.
-- **There is no installer yet.** Running it means a checkout, `uv sync` and
-  `python -m personal_vault` — see the [README](../README.md). Packaging is M6-04 and has not
-  been decided.
+- **There is no installer.** M6-04 builds a folder you copy (`docs/install.md`), not a
+  `.msi`/`.deb`; it is not code-signed, so Windows SmartScreen warns on first run ("More
+  info → Run anyway"), and nothing updates itself — replacing the folder is the update. A
+  development run is still a checkout, `uv sync` and `python -m personal_vault`.
 - **No license has been chosen** (ADR-007, open). Until one is added, all rights are reserved
-  and you should treat this as a personal project you may read but not reuse.
+  and you should treat this as a personal project you may read but not reuse. This now has a
+  hard edge for distribution (M6-04): the packaged build embeds **pykeepass**, which is
+  GPL-3.0, so a folder you hand to someone else is a distribution of GPL-3.0 code — and
+  "all rights reserved" cannot be the terms for that. Running a build you made yourself is
+  private use and raises nothing. Deciding this is Q6, and it is a question for the owner and
+  a lawyer, not for this page.

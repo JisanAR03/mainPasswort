@@ -43,6 +43,28 @@ def test_export_kdbx_refuses_the_vault_file_itself(session: VaultSession, tmp_pa
         session.export_kdbx(session.path, NEW_EXPORT_PASSWORD)
 
 
+def test_export_kdbx_leaves_the_apps_own_secrets_behind(
+    session: VaultSession, tmp_path: Path
+) -> None:
+    """An export goes to other people and other programs; this install's tokens do not.
+
+    The hidden ``.app`` group holds the Drive refresh token and the pairing key.
+    M6-03 found the KDBX export carrying them, because it was a copy of the file.
+    """
+    token = "CANARY-drive-refresh-token-3d21"
+    session.set_app_value("drive-sync", token, username="owner@example.com")
+    session.save()
+    target = tmp_path / "export.kdbx"
+
+    session.export_kdbx(target, NEW_EXPORT_PASSWORD)
+
+    exported = open_vault(target, NEW_EXPORT_PASSWORD)
+    assert {entry.title for entry in exported.entries} == {"GitHub", "Mail"}
+    assert exported.find_groups(name=".app", first=True) is None
+    # the vault the export was made from keeps its token
+    assert session.get_app_value("drive-sync") == token
+
+
 def test_export_csv_has_one_row_per_entry_and_no_other_data(
     session: VaultSession, tmp_path: Path
 ) -> None:

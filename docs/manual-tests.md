@@ -137,6 +137,41 @@ starting the app) so nothing here can reach a real vault.
 - [ ] 11.8 **KeePassXC CLI.** `keepassxc-cli ls "<path to vault.kdbx>"` lists the groups;
       it accepts the same password.
 
+## 12. Packaged install (M6-04, M6's "Done when")
+
+This is the one step that has to be run on a **different machine** from the one that built
+the app — "a fresh machine installs, unlocks, fills and syncs following only the docs". The
+data folder for this drill is a fresh `%TEMP%\pv-packaged\` (`set PV_DATA_DIR=%TEMP%\pv-packaged`),
+so nothing here can reach a real vault.
+
+- [ ] 12.1 Build on the machine with the checkout: `uv sync --group build` then
+      `uv run --group build python scripts/build_app.py`. It ends with `built … (… MiB)` and
+      two executables. Copy `dist\PersonalVault\` to the fresh machine —
+      [install.md](install.md) step 1.
+- [ ] 12.2 The fresh machine has no Python and no uv. Start `PersonalVault.exe` there. It
+      opens to the profile picker, alive and with no error dialog (SmartScreen may warn once:
+      More info → Run anyway). Nothing else has to be installed, and nothing is written yet —
+      the data folder is made by the first profile.
+- [ ] 12.3 Create a profile and unlock. `%TEMP%\pv-packaged\` now holds `profiles.json` and
+      the new profile's folder. Add two entries. Close the app and start it again:
+      both entries are there and the master password is the one you set. This is the part
+      that proves the freeze did not break pykeepass or the vault encryption.
+- [ ] 12.4 Register the packaged host on the fresh machine by hand — the launcher, manifest
+      and registry value in [install.md](install.md) "Point the browser at it", because the
+      fresh machine has no `uv` for the script. Copy the `extension` folder over, load it
+      unpacked, restart the browser, pair (code comparison in the app), and **fill** a login
+      on a real page from the extension.
+- [ ] 12.5 Sync: follow [setup-google-drive.md](setup-google-drive.md) on the packaged build.
+      This is also gate **G4**'s two-device test if the other device is the first machine —
+      the vault that travels is the same KDBX either way.
+- [ ] 12.6 Update: on the building machine make any change, rebuild, copy the new folder over
+      the old one on the fresh machine (app closed, same path). Unlock: the entries from 12.3
+      are still there, because they were never in the program folder.
+- [ ] 12.7 Uninstall drill, on the throwaway data only: delete the program folder, the host
+      registration and the extension. `%TEMP%\pv-packaged\profiles\<id>\vault.kdbx` still
+      opens in KeePassXC with the throwaway password — deleting the app does not delete the
+      vault.
+
 ## Cleanup
 
 - [ ] Delete the test vault, its backups and the exported files. Do not keep the

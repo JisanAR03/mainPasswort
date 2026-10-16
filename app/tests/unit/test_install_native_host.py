@@ -29,8 +29,17 @@ def test_manifest_restricts_allowed_origins_to_our_extension_id() -> None:
 
 
 def test_launcher_runs_the_host_module() -> None:
-    text = install.launcher_text()
+    text = install.launcher_text(install.host_command(None))
     assert "python -m personal_vault.host.pm_host" in text
+
+
+def test_launcher_can_start_a_packaged_host_instead(tmp_path: Path) -> None:
+    """M6-04: on a packaged install there is no checkout for `uv run` to use."""
+    exe = tmp_path / "personal-vault-host.exe"
+    exe.write_bytes(b"")
+    text = install.launcher_text(install.host_command(exe))
+    assert str(exe.resolve()) in text
+    assert "uv run" not in text
 
 
 class _FakeKey:

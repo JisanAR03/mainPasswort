@@ -288,6 +288,12 @@ class VaultSession:
         The copy is made from the last saved file (never from unsaved
         in-memory changes) and is verified by decrypting it with the new
         password before it replaces anything at ``target``.
+
+        The hidden ``.app`` group is left out of the copy: it holds this
+        install's pairing key and Google Drive refresh token, and an export is
+        a file for other people and other programs to open. ``.app`` is
+        reserved for the app's own use everywhere else, so a group by that name
+        is never part of an export.
         """
         password = self._password
         if password is None:
@@ -298,6 +304,8 @@ class VaultSession:
 
         def writer(tmp: Path) -> None:
             kp = open_vault(self.path, password)
+            for group in kp.find_groups(name=APP_GROUP, first=False):
+                kp.delete_group(group)
             kp.password = new_password
             kp.save(str(tmp))
 

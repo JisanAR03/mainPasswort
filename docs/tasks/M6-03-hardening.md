@@ -1,6 +1,7 @@
 # M6-03 Hardening
 
-Milestone: M6 · Sensitive: no (a review — one fix in `ui/`, none in `[S]` files) · Depends on: M5
+Milestone: M6 · Sensitive: **yes** — `core/vault.py` is an `[S]` file (the export fix below)
+· Depends on: M5
 
 ## Goal
 
@@ -13,9 +14,13 @@ audit turns up as a real leak is fixed here; anything that is the owner's call i
 - app/src/personal_vault/ui/app.py (`configure_logging()`, called from `run()`)
 - app/src/personal_vault/ui/vault_view.py (two `log.debug` lines)
 - app/tests/security/test_invariants.py (one new test, under I2)
+- app/src/personal_vault/core/vault.py (`export_kdbx`, owner-decided fix below — `[S]`)
+- app/tests/integration/test_transfer.py (the test for it)
 - docs/tasks/M6-03-hardening.md (this card)
 
-No `[S]` file changes, so no review trailer is needed for this card's diff.
+The `[S]` change came after the audits, on the owner's decision, and is the one part of this
+card that needs a reviewer's eye; no `Security-Reviewed-By:` trailer is recorded for it (rule
+9 — the owner adds that, nobody else).
 
 ## 1. Dependencies
 
@@ -139,14 +144,19 @@ by opening the vault and re-saving it under the new password — so the exported
 - The spec is not contradicted: data-model.md says "the default export is an encrypted KDBX
   copy", and a copy is what it is. The spec simply never considered app values.
 
-**Decision for the owner, not taken here.** The one-line fix is to drop the `.app` group from
-the copy before saving it (and to say so in the export dialog). The cost is real: someone who
-exports a vault and then uses the export as their main vault would have to link Drive and pair
-the extension again, because the export no longer carries the key. Since M2-08 was accepted
-with this export behaviour, changing it is the owner's call — and it is a change to an `[S]`
-file, so it needs a review trailer either way. Until then,
-[docs/known-limitations.md](../known-limitations.md) states it plainly, and this card records
-it so it cannot be lost.
+**Decided by the owner (2026-10-16): strip `.app` from the export.** `export_kdbx` now deletes
+the `.app` group from the copy before it saves it. The cost the card named is real and stands:
+someone who exports a vault and then uses the export as their main vault has to link Drive and
+pair the extension again. The owner took the trade.
+
+The change is in `core/vault.py` — an `[S]` file — so it carries its own test,
+`test_export_kdbx_leaves_the_apps_own_secrets_behind` in `app/tests/integration/test_transfer.py`
+(a Drive-token canary is set on the session, the export is opened, and the test asserts the
+`.app` group is absent from the copy while the source vault keeps its token). The export dialog
+was left as it is: its KDBX option is a copy of your entries either way, and the honest place
+for the token is this page and
+[docs/known-limitations.md](../known-limitations.md), which no longer calls it an open
+question.
 
 ## Acceptance tests
 
@@ -158,8 +168,8 @@ it so it cannot be lost.
       and M6-02 were committed)
 - [ ] the owner re-runs `uv run pip-audit` and `gitleaks detect --source . --config .gitleaks.toml`
       on `main` at release time — M6's "Done when" line is theirs
-- [ ] the owner decides the KDBX export's `.app` group (above). Recorded, documented, and left
-      alone until they do
+- [x] the owner decided the KDBX export's `.app` group — strip it — and the fix is in with its
+      test (above)
 
 ## Out of scope
 
