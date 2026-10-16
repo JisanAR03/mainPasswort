@@ -8,11 +8,14 @@ Writes the host launcher and manifest under ``extension/native-host/``
 - Linux: ``~/.config/google-chrome/NativeMessagingHosts/com.personalvault.host.json``
   and ``~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/``
 
-Run with ``uv run python scripts/install_native_host.py``.
+Run with ``uv run python scripts/install_native_host.py``, or, on a machine that
+runs the PyInstaller build (M6-04) rather than a checkout, with
+``--host-exe <path to personal-vault-host.exe>``.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -25,13 +28,26 @@ HOST_DIR = ROOT / "extension" / "native-host"
 # If the keypair is ever regenerated, update this constant with the new ID.
 EXTENSION_ID = "pkmjgefocdecdncjcpdlohfnahebkkpi"
 
-_COMMAND = f'uv run --project "{ROOT}" python -m personal_vault.host.pm_host'
+_REPO_COMMAND = f'uv run --project "{ROOT}" python -m personal_vault.host.pm_host'
 
 
-def launcher_text() -> str:
+def host_command(host_exe: Path | None) -> str:
+    """The command the browser runs: a packaged host executable, or this checkout.
+
+    ``--host-exe`` is for a machine running the PyInstaller build (M6-04) — the
+    browser cannot start `uv run` there, so it starts the packaged console
+    program directly. Its path is used as given (absolute), because the browser
+    resolves the launcher's command from a working directory of its own.
+    """
+    if host_exe is None:
+        return _REPO_COMMAND
+    return f'"{host_exe.resolve()}"'
+
+
+def launcher_text(command: str) -> str:
     if os.name == "nt":
-        return f"@echo off\r\n{_COMMAND}\r\n"
-    return f'#!/bin/sh\nexec {_COMMAND} "$@"\n'
+        return f"@echo off\r\n{command}\r\n"
+    return f'#!/bin/sh\nexec {command} "$@"\n'
 
 
 def manifest_text(launcher_path: Path) -> str:
@@ -45,11 +61,11 @@ def manifest_text(launcher_path: Path) -> str:
     return json.dumps(manifest, indent=2) + "\n"
 
 
-def _write_host_files() -> Path:
+def _write_host_files(host_exe: Path | None) -> Path:
     """Write the launcher and the manifest; returns the manifest path."""
     HOST_DIR.mkdir(parents=True, exist_ok=True)
     launcher = HOST_DIR / ("launcher.bat" if os.name == "nt" else "launcher.sh")
-    launcher.write_text(launcher_text(), encoding="utf-8")
+    launcher.write_text(launcher_text(host_command(host_exe)), encoding="utf-8")
     if os.name != "nt":
         launcher.chmod(0o755)
     manifest_path = HOST_DIR / f"{HOST_NAME}.json"
@@ -78,17 +94,32 @@ def _register_posix(manifest_path: Path) -> None:
         (config_dir / f"{HOST_NAME}.json").write_text(text, encoding="utf-8")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=f"Install the {HOST_NAME} native host")
+    parser.add_argument(
+        "--host-exe",
+        type=Path,
+        default=None,
+        help="path to the packaged personal-vault-host executable (M6-04 build); "
+        "default is to run the host out of this checkout with uv",
+    )
+    args = parser.parse_args(argv)
+
+    if args.host_exe is not None and not args.host_exe.is_file():
+        print(f"no such file: {args.host_exe}")
+        return 1
+
     if os.name == "nt":
-        manifest_path = _write_host_files()
+        manifest_path = _write_host_files(args.host_exe)
         _register_windows(manifest_path)
     elif sys.platform.startswith("linux"):
-        manifest_path = _write_host_files()
+        manifest_path = _write_host_files(args.host_exe)
         _register_posix(manifest_path)
     else:
         print("unsupported platform: only Windows and Linux are supported (Q5)")
         return 1
     print(f"installed {HOST_NAME} for Chrome and Brave")
+    print(f"host command: {host_command(args.host_exe)}")
     print(f"manifest: {manifest_path}")
     return 0
 
