@@ -1,0 +1,15 @@
+# gitleaks reads the extension manifest's "key" as a generic API key. It is a
+# public key: it only pins the extension ID the native-host registration names,
+# and it is meant to be in the repository. The allowlist matches that one value
+# and nothing else, so any other secret, in that file or any other, is still
+# reported.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "the extension manifest's public key, which pins the extension ID"
+regexTarget = "match"
+regexes = [
+  'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4VsWMgnR5CruWQMRFeAlOvhDNd0PEtzXKtY1945',
+]
