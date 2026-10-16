@@ -1,8 +1,9 @@
 # Milestones
 
-> Source: design pack v0.1, sections 10–12. Status: **G0 passed 2026-10-15; M0–M3 built and
-> self-reviewed 2026-10-15; M4 and M5 built and self-reviewed 2026-10-16 — owner checks
-> pending at G1, G2, G3 and G4.**
+> Source: design pack v0.1, sections 10–12. Status: **G0 passed 2026-10-15; M0–M3 built,
+> self-reviewed and merged on 2026-10-15; M4 and M5 built, self-reviewed and merged on
+> 2026-10-16 — owner checks pending at G1, G2, G3 and G4. The M4/M5 merge carries no
+> security review sign-off: that review is G2, still open.**
 
 Seven milestones, M0 to M6. Each is split into tasks small enough for one AI session, and each
 is closed by a gate that the owner signs off. A milestone is done only when every "Done when"
@@ -29,8 +30,8 @@ left D2 (license, Q6) and Q7 (first importer) open. See [docs/adr/](../adr/).
 
 | When | Milestones |
 | --- | --- |
-| Now | M4 browser extension and M5 Drive sync (M0–M3 merged; both self-reviewed, PR open; G1/G2/G3/G4 sign-off pending) |
-| Next | M6 merge, hardening and release |
+| Now | M6 merge, hardening and release (M0–M5 merged; G1/G2/G3/G4 sign-off pending) |
+| Next | G5: a public release, after the outside security review |
 
 Dates stay open until M0 shows how many task cards get finished in a week.
 
