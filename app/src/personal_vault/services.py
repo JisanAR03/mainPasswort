@@ -26,7 +26,7 @@ from personal_vault.core.settings import DEFAULTS, SCHEMA_VERSION, SettingsStore
 from personal_vault.core.transfer import export_csv as core_export_csv
 from personal_vault.core.transfer import import_csv as core_import_csv
 from personal_vault.core.transfer import import_kdbx as core_import_kdbx
-from personal_vault.core.vault import VaultSession, open_vault  # noqa: F401 (re-export)
+from personal_vault.core.vault import MergeReport, VaultSession, open_vault  # noqa: F401 (re-export)
 from personal_vault.sync.drive_client import DriveClient, HttpDriveClient
 from personal_vault.sync.engine import (
     FIRST_LINK_ASK,
@@ -50,6 +50,7 @@ __all__ = [
     "InvalidPassword",
     "LoginEntry",
     "LoginSummary",
+    "MergeReport",
     "Profile",
     "ProfileStore",
     "SecretStr",
@@ -394,6 +395,16 @@ def reload_vault(session: VaultSession) -> VaultSession:
     return session.reopen()
 
 
+def _merged_message(report: MergeReport) -> str:
+    """What a merge did, in one sentence. Counts only: never an entry field."""
+    if report.total == 0:
+        return "both copies already held the same entries"
+    return (
+        f"merged {report.updated} changed, {report.added} added and "
+        f"{report.deleted} deleted from Drive's copy"
+    )
+
+
 @dataclass(frozen=True)
 class SyncReport:
     """What the status line shows: one of the spec's states, and why."""
@@ -556,6 +567,43 @@ class SyncController:
             # adopting does not put their copy on Drive's head: ask for a run now
             self.sync_now()
         return result
+
+    def merge_both(self) -> SyncResult:
+        """Merge Drive's kept copy into this vault, then publish the result.
+
+        Both sides keep what the other changed entry by entry (M6-01). The
+        merged file is saved here through storage — atomic, verified, backed up
+        — and then uploaded the way "Keep mine" uploads it, which is what ends
+        the conflict. Nothing is lost if the upload fails: the merge is on disk,
+        the conflict stands, and the next click merges the same copy again.
+        """
+        kept = self._kept_conflict_copy()
+        if kept is None:
+            return SyncResult(Status.ATTENTION, "the copy Drive sent is not here any more")
+        try:
+            theirs = review_copy(self._session, kept)  # read only, never saved through
+        except (VaultError, ValueError) as exc:
+            return SyncResult(Status.ATTENTION, f"Drive's copy could not be opened: {exc}")
+        try:
+            report = self._session.merge_from(theirs)
+        except (VaultError, ValueError) as exc:
+            return SyncResult(Status.ATTENTION, f"the two copies could not be merged: {exc}")
+        finally:
+            theirs.close()
+        result = self.engine.upload_local()
+        if result.status is not Status.SYNCED:
+            return result
+        return SyncResult(Status.SYNCED, _merged_message(report))
+
+    def _kept_conflict_copy(self) -> Path | None:
+        """The copy the conflict kept, as the state file recorded it."""
+        state = self.engine.state()
+        conflict = state.conflict if state is not None else None
+        if not conflict:
+            return None
+        raw = conflict.get("kept_path")
+        path = Path(str(raw)) if isinstance(raw, str) and raw else None
+        return path if path is not None and path.exists() else None
 
     # --- what the status line reads ----------------------------------------
 

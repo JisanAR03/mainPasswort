@@ -57,8 +57,16 @@ class _Actions:
             assert self.opened is not None
             self.opened.append(path)
 
+        def merge_both() -> SyncOutcome:
+            assert self.calls is not None
+            self.calls.append("merge_both")
+            return self.keep
+
         return ConflictActions(
-            keep_mine=keep_mine, take_theirs=take_theirs, open_theirs=open_theirs
+            keep_mine=keep_mine,
+            take_theirs=take_theirs,
+            open_theirs=open_theirs,
+            merge_both=merge_both,
         )
 
 
@@ -84,12 +92,13 @@ def test_the_banner_is_not_there_without_a_conflict(qtbot: QtBot) -> None:
     assert banner.isHidden()
 
 
-def test_a_conflict_shows_the_time_the_kept_copy_and_three_choices(qtbot: QtBot) -> None:
+def test_a_conflict_shows_the_time_the_kept_copy_and_the_choices(qtbot: QtBot) -> None:
     banner, _ = _banner(qtbot)
     assert not banner.isHidden()
     assert "both copies changed" in banner.heading.lower()
     assert "2026-10-16 09:41 UTC" in banner.detail
     assert "vault-20261016T094107Z.kdbx" in banner.detail
+    assert banner.merge_button.text() == "Merge both"  # M6-01, tested in test_merge_button
     assert banner.keep_button.text() == "Keep mine"
     assert banner.take_button.text() == "Take theirs"
     assert banner.open_button.text() == "Open both"
@@ -223,10 +232,16 @@ class _Conflict:
         assert self.conflict is not None
 
     def actions(self) -> ConflictActions:
+        def merge_both() -> SyncOutcome:
+            # merging two files is services.py's work (it needs a session):
+            # test_merge_button.py runs it against this same fake Drive
+            raise NotImplementedError("the engine cannot merge; the controller does")
+
         return ConflictActions(
             keep_mine=lambda: _describe(self.engine.upload_local()),
             take_theirs=lambda: _describe(self.engine.adopt_remote()),
             open_theirs=lambda path: path.read_bytes(),  # read-only: never written back
+            merge_both=merge_both,
         )
 
     def kept(self) -> list[Path]:

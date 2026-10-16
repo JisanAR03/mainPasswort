@@ -15,6 +15,7 @@ SENSITIVE_FILES = {
     "app/src/personal_vault/core/storage.py",
     "app/src/personal_vault/core/kdf.py",
     "app/src/personal_vault/core/matching.py",
+    "app/src/personal_vault/core/merge.py",
     "app/src/personal_vault/core/generator.py",
     "app/src/personal_vault/core/redaction.py",
     "app/src/personal_vault/ui/clipboard.py",

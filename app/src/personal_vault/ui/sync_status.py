@@ -272,6 +272,7 @@ class SyncStatusBar(QWidget):
             keep_mine=lambda: outcome_of(self._controller.keep_mine()),
             take_theirs=lambda: outcome_of(self._controller.take_theirs()),
             open_theirs=self._open_theirs,
+            merge_both=lambda: outcome_of(self._controller.merge_both()),
         )
 
     def _open_theirs(self, path: Path) -> None:
