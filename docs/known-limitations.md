@@ -38,6 +38,10 @@ These are limits of the design, not bugs waiting to be fixed:
 - **The extension can read every `http` and `https` page you visit.** It needs that to find login
   fields and notice sign-ins, and asks for it at install. It reads only login fields, only when you
   focus or submit one, and nothing leaves the browser except the encrypted vault to your own Drive.
+- **Closed shadow DOM.** Fields inside *open* shadow roots (web components, as on Reddit's login)
+  work like any other. A site that builds its login inside a *closed* shadow root hides it from every
+  page script and every extension; there the menu does not open, the popup's Fill says "No login
+  fields found on this page.", and nothing is offered for saving.
 - **A failed sign-in can be offered for saving.** The extension cannot tell whether the site
   accepted the password; choose **Not now**.
 

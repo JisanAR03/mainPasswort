@@ -10,6 +10,19 @@ described below was removed; its entries stay as the history of how this was bui
 gate G2 (the `[S]` read-through) is open and no outside security review has been done. Each
 milestone below has a card in [docs/tasks/](docs/tasks/) saying what it built and what proves it.
 
+### Fixed
+
+- Logins whose boxes sit inside shadow DOM now work (2026-11-05,
+  [docs/tasks/fix-shadow-dom-login.md](docs/tasks/fix-shadow-dom-login.md)). Reddit's login modal builds
+  its username and password inputs inside web components (`faceplate-text-input`), where the extension's
+  ordinary page queries cannot see them: no suggestion menu opened, the popup's Fill found no field,
+  and no save prompt followed a sign-in. A small shared script (`deep.js`) now walks open shadow roots,
+  and the menu, the fill and the sign-in detector use it; the real focused field and click target come
+  from the event's composed path instead of the shadow host. Also fixed on the way: an `autocomplete`
+  of `"username webauthn"` was not recognised as a username, "username before password" could not be
+  decided across separate shadow roots, and the popup said "Filled." when it had found nothing to fill
+  (it now says "No login fields found on this page."). Closed shadow roots are out of reach by design.
+
 ### Removed
 
 - The desktop app (2026-11-05, [EXT-01](docs/tasks/EXT-01-remove-desktop-app.md)): the Qt windows,

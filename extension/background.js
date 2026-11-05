@@ -181,6 +181,7 @@ async function handleMenu(message, sender) {
       const tab = await chrome.tabs.get(tabId);
       if (tab.url !== session.url) return fail("url_changed");
       const reply = await fillInto(tabId, session.documentId, login.id, session.url);
+      if (reply.ok && reply.result && reply.result.filled === false) return fail("no_login_field");
       if (reply.ok) await closeMenu(tabId);
       return reply;
     }

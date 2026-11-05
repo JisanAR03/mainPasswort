@@ -141,6 +141,9 @@ the browser then shows the setting as controlled by the extension. Step 2 does t
   menu or the popup.
 - **Top frame only.** A login form inside an iframe, even a same-site one, gets no menu and is never
   filled or offered for saving.
+- **Closed shadow DOM.** Boxes inside web components with an *open* shadow root (Reddit's login, for
+  one) work. A site that uses a *closed* shadow root hides the login from every extension; the popup
+  then says "No login fields found on this page."
 - **Pages where extensions do not run:** the browser's own pages (`chrome://…`, the Web Store),
   `file://` pages, and sites an administrator's policy blocks.
 - **No Firefox build.**
@@ -156,5 +159,5 @@ the browser then shows the setting as controlled by the extension. Step 2 does t
 | `Access blocked: … has not completed the Google verification process` | The consent screen is in *Testing* and your account is not a test user: publish it (*In production*) or add the account. |
 | The panel says **the sign-in needs renewing** | Click **Reconnect Google Drive**. It happens when the browser is signed out of that Google account or the grant was revoked. |
 | The panel says **Google Drive is full** | Free space in Drive; your changes are safe in the browser and upload by themselves. |
-| Nothing happens on Fill | The page changed since the menu opened (click the field again), or the fields are hidden: only visible fields are filled. |
+| Nothing happens on Fill | The page changed since the menu opened (click the field again), or the fields are hidden: only visible fields are filled. "No login fields found on this page." means the extension could not see a login field there (an iframe, or a closed shadow root). |
 | The vault is slow to unlock | Argon2 runs in WebAssembly, single-threaded; a vault made elsewhere keeps its settings and takes about three seconds. |

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Sign in (shadow DOM)</title>
+  </head>
+  <body>
+    <h1>Sign in</h1>
+    <!--
+      A login built from web components, as on Reddit: each field is a component whose
+      <input> lives in its own shadow root, so document.querySelector cannot see it, and
+      the Log In button is a component too. ?mode=nested puts the components inside
+      another component's shadow root; ?mode=closed uses closed shadow roots, which no
+      extension can see into.
+    -->
+    <div id="app">
+      <form id="login"></form>
+    </div>
+    <script>
+      const mode = new URLSearchParams(location.search).get("mode") || "flat";
+      window.__inputs = {}; // the page keeps its own references, so a test can read closed roots
+      window.__docInputs = 0;
+      window.__logins = 0;
+      document.addEventListener("input", () => (window.__docInputs += 1));
+
+      class FakeField extends HTMLElement {
+        connectedCallback() {
+          const root = this.attachShadow({ mode: this.hasAttribute("closed") ? "closed" : "open" });
+          const hide = this.getAttribute("hide");
+          const hidden = {
+            display: "input { display: none }",
+            visibility: "input { visibility: hidden }",
+            opacity: "input { opacity: 0 }",
+            zero: "input { width: 0; height: 0; padding: 0; border: 0 }",
+          }[hide] || "";
+          root.innerHTML = `<style>input { width: 260px; padding: 4px } ${hidden}</style>
+            <label>${this.getAttribute("label") || ""} <input /></label>`;
+          const input = root.querySelector("input");
+          for (const name of ["name", "type", "autocomplete"]) {
+            if (this.hasAttribute(name)) input.setAttribute(name, this.getAttribute(name));
+          }
+          window.__inputs[this.getAttribute("name")] = input;
+        }
+      }
+      class FakeButton extends HTMLElement {
+        connectedCallback() {
+          const root = this.attachShadow({ mode: "open" });
+          root.innerHTML = `<button type="button">${this.getAttribute("label")}</button>`;
+          // a sign-in with no <form> submit and no reload, as a single-page app does it
+          root.querySelector("button").addEventListener("click", async () => {
+            window.__logins += 1;
+            await fetch("welcome.html");
+            history.pushState({}, "", "#signed-in");
+            document.getElementById("app").innerHTML = '<p id="done">Signed in.</p>';
+          });
+        }
+      }
+      class FakeCard extends HTMLElement {
+        connectedCallback() {
+          this.attachShadow({ mode: "open" });
+        }
+      }
+      customElements.define("fake-field", FakeField);
+      customElements.define("fake-button", FakeButton);
+      customElements.define("fake-card", FakeCard);
+
+      const closed = mode === "closed";
+      const field = (attributes) => {
+        const element = document.createElement("fake-field");
+        for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
+        return element;
+      };
+      const parts = [
+        // fields that must never be filled, placed first so a naive search meets them first
+        field({ name: "h-display", type: "password", hide: "display" }),
+        field({ name: "h-visibility", type: "password", hide: "visibility" }),
+        field({ name: "h-opacity", type: "password", hide: "opacity" }),
+        field({ name: "h-zero", type: "password", hide: "zero" }),
+        field({
+          name: "username",
+          type: "text",
+          autocomplete: "username webauthn",
+          label: "Email or username",
+          ...(closed ? { closed: "" } : {}),
+        }),
+        field({
+          name: "password",
+          type: "password",
+          autocomplete: "current-password",
+          label: "Password",
+          ...(closed ? { closed: "" } : {}),
+        }),
+      ];
+      const button = document.createElement("fake-button");
+      button.setAttribute("label", "Log In");
+      const form = document.getElementById("login");
+      if (mode === "nested") {
+        const card = document.createElement("fake-card");
+        form.append(card);
+        card.shadowRoot.append(...parts, button);
+      } else {
+        form.append(...parts, button);
+      }
+    </script>
+  </body>
+</html>

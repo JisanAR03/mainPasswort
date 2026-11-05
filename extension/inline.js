@@ -11,9 +11,16 @@
 // worker hands it only a one-time token for each frame and the frame's
 // height. A fill is started by your click inside the menu frame, which the
 // page cannot fake.
+//
+// Login fields inside OPEN shadow roots (web components, as on Reddit's login)
+// are found through deep.js: focus and clicks arrive retargeted to the outermost
+// host, so the real field comes from the event's composed path and from the
+// deep active element. A closed shadow root is out of reach by design.
 
 (() => {
   if (window.top !== window) return;
+  const deep = globalThis.__personalVaultDeep; // deep.js: search inside open shadow roots
+  if (!deep) return; // deep.js did not load: do nothing rather than half-work
 
   const MENU_URL = chrome.runtime.getURL("menu.html");
   const PROMPT_URL = chrome.runtime.getURL("prompt.html");
@@ -80,8 +87,12 @@
     return USERNAME_HINT.test(hints.join(" "));
   }
 
+  // Is there a password field on the page? (`field.form` is null for a field in a
+  // shadow root, and the password can sit in another shadow root, so the whole
+  // page is searched, as it always was for a field with no form.)
   function passwordNear(field) {
-    return Boolean((field.form || document).querySelector('input[type="password"]'));
+    if (field.form) return Boolean(field.form.querySelector('input[type="password"]'));
+    return deep.deepQueryAll(document, 'input[type="password"]').length > 0;
   }
 
   // set by fill.js, in this same isolated world, while it moves focus
@@ -128,7 +139,7 @@
     });
     if (opening === field) opening = null;
     // a later focus, or the field losing focus meanwhile, wins
-    if (seq !== openSeq || !reply || !reply.show || document.activeElement !== field) {
+    if (seq !== openSeq || !reply || !reply.show || deep.deepActiveElement() !== field) {
       if (reply && reply.token) request({ type: "menu_close", token: reply.token });
       return;
     }
@@ -160,7 +171,7 @@
   document.addEventListener(
     "focusin",
     (event) => {
-      if (event.isTrusted) considerField(event.target);
+      if (event.isTrusted) considerField(deep.eventTarget(event));
     },
     true,
   );
@@ -169,9 +180,9 @@
   document.addEventListener(
     "click",
     (event) => {
-      if (event.isTrusted && !menu && event.target === document.activeElement) {
-        considerField(event.target);
-      }
+      if (!event.isTrusted || menu) return;
+      const target = deep.eventTarget(event);
+      if (target === deep.deepActiveElement()) considerField(target);
     },
     true,
   );
@@ -181,7 +192,7 @@
     () => {
       // focus moving into the menu frame shows up as focus on our host element
       setTimeout(() => {
-        if (menu && document.activeElement !== menu.field && document.activeElement !== host) {
+        if (menu && deep.deepActiveElement() !== menu.field && document.activeElement !== host) {
           closeMenu();
         }
       }, 150);
@@ -196,7 +207,8 @@
     "input",
     (event) => {
       if (!event.isTrusted || filling()) return;
-      if (opening === event.target || (menu && menu.field === event.target)) closeMenu();
+      const target = deep.eventTarget(event);
+      if (opening === target || (menu && menu.field === target)) closeMenu();
     },
     true,
   );
@@ -204,7 +216,7 @@
   document.addEventListener(
     "keydown",
     (event) => {
-      if (!menu || event.target !== menu.field) return;
+      if (!menu || deep.eventTarget(event) !== menu.field) return;
       if (event.key === "Escape") closeMenu();
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -259,5 +271,5 @@
   request({ type: "prompt_open" }).then((reply) => {
     if (reply && reply.show) showPrompt(reply.token);
   });
-  considerField(document.activeElement);
+  considerField(deep.deepActiveElement());
 })();

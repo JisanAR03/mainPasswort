@@ -19,6 +19,7 @@ own Google Drive. Nothing else runs: no server, no desktop program, no native ho
 | Vault page | `vault.html`, `vault.js` | Extension tab | Entry being edited | Profiles, entries, generator, settings, export, Drive status and choices. |
 | Popup | `popup.html`, `popup.js` | Toolbar popup | Titles and usernames for this site | Unlock, lock, list and fill, add a login, one-line sync status. |
 | In-page menu and prompt | `inline.js`, `menu.html/js`, `prompt.html/js` | Content script + extension frames | Frames: titles, usernames; the script: nothing | The suggestion menu under login fields and the save/update prompt, in frames inside a closed shadow root. |
+| Shadow-DOM search | `deep.js` | Content script (top frame) | No | Finds fields and buttons inside open shadow roots, in page order, for `detect.js` and `inline.js`; `fill.js` carries its own copy. |
 | Detector | `detect.js` | Content script (top frame) | A submitted login, handed straight on | Notices a sign-in: form submit, Enter, sign-in button click, a two-step username. |
 | Fill | `fill.js` | Injected into frame 0 | The login it fills | Fills visible fields, never submits. |
 | Generator, matching | `generator.js`, `matching.js` | Worker and engine | Generates, never stores | Password generation; the site-matching rules. |

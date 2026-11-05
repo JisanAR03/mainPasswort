@@ -21,6 +21,7 @@ SENSITIVE_FILES = {
     "extension/detect.js",
     "extension/background.js",
     "extension/inline.js",
+    "extension/deep.js",
     "extension/menu.js",
     "extension/prompt.js",
     # the vault in the browser: its engine, storage, key, Drive and the token
