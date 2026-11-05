@@ -147,6 +147,7 @@ def ext_extension(tmp_path_factory: pytest.TempPathFactory, fake_google: FakeGoo
             '"https://www.googleapis.com/drive/v3/about"': f'"{base}/drive/v3/about"',
             '"https://accounts.google.com/o/oauth2/v2/auth"': f'"{base}/auth"',
             "UPLOAD_QUIET_MS = 10 * 1000;": "UPLOAD_QUIET_MS = 300;",
+            "CLIPBOARD_CLEAR_MS = 30 * 1000;": "CLIPBOARD_CLEAR_MS = 4000;",
             "BACKOFF_SECONDS = [30, 60, 120, 240, 480, 960, 1800];": (
                 "BACKOFF_SECONDS = [1, 1, 2, 2, 2, 2, 2];"
             ),

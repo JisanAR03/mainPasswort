@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Sign in (dialog)</title>
+    <style>
+      /* ?centered=1: the way many sites centre a modal, with a transform; a
+         transformed ancestor becomes the containing block of position: fixed */
+      dialog.centered {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        margin: 0;
+        transform: translate(-50%, -50%);
+      }
+      dialog { width: 420px; padding: 24px; }
+    </style>
+  </head>
+  <body>
+    <h1>A page with a sign-in dialog</h1>
+    <dialog id="dlg">
+      <form id="login" action="?submitted=1" method="get">
+        <label>Username <input id="username" name="username" type="text" autocomplete="username" /></label>
+        <label>Password <input id="password" name="password" type="password" autocomplete="current-password" /></label>
+        <button id="submit" type="submit">Sign in</button>
+      </form>
+    </dialog>
+    <script>
+      // A native modal dialog: while it is open the rest of the document is inert
+      // and the dialog sits in the browser's top layer, above everything.
+      const dialog = document.getElementById("dlg");
+      if (new URLSearchParams(location.search).get("centered")) dialog.classList.add("centered");
+      dialog.showModal();
+    </script>
+  </body>
+</html>

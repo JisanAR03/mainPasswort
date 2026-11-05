@@ -10,7 +10,9 @@
     "storage",
     "offscreen",
     "alarms",
-    "identity"
+    "identity",
+    "clipboardRead",
+    "clipboardWrite"
   ],
   "optional_permissions": [
     "idle"

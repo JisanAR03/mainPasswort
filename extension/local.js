@@ -44,8 +44,9 @@ async function ensureEngine() {
     creating = chrome.offscreen
       .createDocument({
         url: OFFSCREEN_URL,
-        reasons: ["DOM_PARSER"],
-        justification: "Reads and writes the encrypted KDBX vault with the browser's XML parser.",
+        reasons: ["DOM_PARSER", "CLIPBOARD"],
+        justification:
+          "Reads and writes the encrypted KDBX vault with the browser's XML parser, and takes a copied password off the clipboard after 30 seconds.",
       })
       .catch(async (error) => {
         if (!(await engineExists())) throw error; // another call made it first

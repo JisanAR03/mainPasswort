@@ -14,6 +14,7 @@
 // a plaintext field anywhere: IndexedDB gets the encrypted file only.
 /* global kdbxweb, hashwasm */
 import {
+  CLIPBOARD_CLEAR_MS,
   KDF_MEMORY_MIB,
   KDF_MIN_ITERATIONS,
   KDF_MIN_MEMORY_MIB,
@@ -112,6 +113,75 @@ async function calibrateIterations() {
   });
   const perIteration = Math.max(performance.now() - started, 1);
   return Math.max(KDF_MIN_ITERATIONS, Math.round(KDF_TARGET_MS / perIteration));
+}
+
+// --- the clipboard -----------------------------------------------------------------
+//
+// A password copied from the vault page is taken off the clipboard after
+// CLIPBOARD_CLEAR_MS — but only if the clipboard still holds it, so something you
+// copied afterwards is never wiped. It happens here, not in the vault page, so
+// closing that page does not leave the password on the clipboard. Only the
+// SHA-256 of the copied text is kept here, never the text. This document has no
+// focus, so it uses the old copy/paste commands: clipboardRead lets "paste" read
+// the clipboard here and clipboardWrite lets "copy" write it without a click
+// (measured: without it the write returns false). An empty copy leaves the
+// clipboard as it was, so the clear writes a single space.
+
+let armed = null; // { digest, timer }
+
+function clipboardField() {
+  const field = document.createElement("textarea");
+  document.body.append(field);
+  return field;
+}
+
+function readClipboard() {
+  const field = clipboardField();
+  try {
+    field.focus();
+    return document.execCommand("paste") ? field.value : null;
+  } catch {
+    return null;
+  } finally {
+    field.remove();
+  }
+}
+
+function writeClipboard(text) {
+  const field = clipboardField();
+  try {
+    field.value = text;
+    field.select();
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    field.remove();
+  }
+}
+
+async function hexSha256(textValue) {
+  const sha = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(textValue)));
+  return [...sha].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Clear the clipboard if it still holds the copied text; if it cannot be read
+// (the permission was refused), clear it anyway — better a lost copy than a
+// password left behind.
+async function clearIfHeld() {
+  if (!armed) return;
+  const { digest, timer } = armed;
+  clearTimeout(timer);
+  armed = null;
+  const held = readClipboard();
+  if (held === null || (await hexSha256(held)) === digest) writeClipboard(" ");
+}
+
+function armClipboard({ digest }) {
+  if (typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)) throw new EngineError("bad_request");
+  if (armed) clearTimeout(armed.timer);
+  armed = { digest, timer: setTimeout(() => clearIfHeld(), CLIPBOARD_CLEAR_MS) };
+  return {};
 }
 
 // --- the file as KeePassXC and pykeepass expect it ------------------------------
@@ -441,9 +511,27 @@ async function deleteEntry({ entryId }) {
   return {};
 }
 
+// A login saved from a page is saved for the site: its origin, never the path
+// or query of the address bar (which can hold a token), and the host as the
+// default title. Matching ignores the path, so nothing is lost.
 async function saveLogin({ url, username, password, title }) {
+  let site;
+  try {
+    site = new URL(url);
+  } catch {
+    throw new EngineError("invalid");
+  }
+  if (!["http:", "https:"].includes(site.protocol) || !site.hostname) throw new EngineError("invalid");
   return addEntry({
-    entry: { title: title || url, username, password, urls: [url], notes: "", tags: [], match_subdomains: false },
+    entry: {
+      title: title || site.host,
+      username,
+      password,
+      urls: [`${site.origin}/`],
+      notes: "",
+      tags: [],
+      match_subdomains: false,
+    },
   });
 }
 
@@ -514,10 +602,12 @@ const OPS = {
   status: () => ({ profileId: current ? current.profileId : null }),
   create: createVault,
   open: openVault,
-  close: () => {
+  close: async () => {
     current = null;
+    await clearIfHeld(); // locking takes a copied password off the clipboard
     return {};
   },
+  clipboard_arm: armClipboard,
   matches,
   secret,
   list,

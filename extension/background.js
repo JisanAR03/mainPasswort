@@ -90,14 +90,24 @@ function tellTab(tabId, message) {
   chrome.tabs.sendMessage(tabId, message, { frameId: 0 }).catch(() => {});
 }
 
-async function targetTab() {
-  const tabs = await chrome.tabs.query({});
-  const web = tabs.filter((tab) => tab.url && /^https?:/.test(tab.url));
-  return (
-    web.find((tab) => tab.active) ||
-    web.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] ||
-    null
-  );
+// The tab the popup acts on: the page you are looking at in the window the
+// popup belongs to. The toolbar popup has no tab of its own, so that is the
+// active tab of the last focused window; popup.html opened as a tab (a pinned
+// page, the tests) acts on the page you were last on in its own window. It
+// never falls back to a tab of another window — that was the page you were not
+// looking at.
+async function targetTab(sender) {
+  const isWeb = (tab) => Boolean(tab.url) && /^https?:/.test(tab.url);
+  if (sender && sender.tab) {
+    const tabs = await chrome.tabs.query({ windowId: sender.tab.windowId });
+    return (
+      tabs
+        .filter(isWeb)
+        .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] || null
+    );
+  }
+  const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return active && isWeb(active) ? active : null;
 }
 
 // The vault's answer for one page URL: its matches, or why there are none.
@@ -397,7 +407,7 @@ async function handlePrompt(message, sender) {
   return fail("bad_request");
 }
 
-async function handlePopup(message) {
+async function handlePopup(message, sender) {
   switch (message.type) {
     case "status":
       return local.localRequest("hello", {
@@ -405,14 +415,14 @@ async function handlePopup(message) {
       });
 
     case "get_logins": {
-      const tab = await targetTab();
+      const tab = await targetTab(sender);
       if (!tab) return fail("no_tab");
       const reply = await local.localRequest("get_logins", { url: tab.url });
       return { ...reply, tab_url: tab.url };
     }
 
     case "fill": {
-      const tab = await targetTab();
+      const tab = await targetTab(sender);
       if (!tab || tab.url !== message.url) {
         // the page changed between listing and clicking: never fill
         return fail("url_changed");
@@ -490,6 +500,7 @@ const EXT_TYPES = new Set([
   "ext_delete_entry",
   "ext_generate",
   "ext_export",
+  "ext_clipboard_arm",
   "ext_settings",
   "ext_connect",
   "ext_disconnect",
@@ -563,6 +574,8 @@ async function handleExt(message) {
       return local.localRequest("generate_password", { length: args.length });
     case "ext_export":
       return local.vaultOp("export", {});
+    case "ext_clipboard_arm":
+      return local.vaultOp("clipboard_arm", { digest: args.digest });
     case "ext_settings": {
       const { settings = {} } = await store.get("settings");
       const next = { ...settings };
@@ -634,7 +647,9 @@ async function route(message, sender) {
     await sync.syncUnlocked();
     return { ok: true };
   }
-  if (POPUP_TYPES.has(type) && fromExtensionPage(sender, "popup.html")) return handlePopup(message);
+  if (POPUP_TYPES.has(type) && fromExtensionPage(sender, "popup.html")) {
+    return handlePopup(message, sender);
+  }
   if (PAGE_TYPES.has(type) && fromPage(sender)) return handlePage(message, sender);
   if (MENU_TYPES.has(type) && sender.tab && fromExtensionPage(sender, "menu.html")) {
     return handleMenu(message, sender);
