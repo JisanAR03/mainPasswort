@@ -11,39 +11,20 @@
       <button id="lock" class="plain" hidden>Lock</button>
     </header>
 
-    <p id="status" class="status">Checking the desktop app…</p>
+    <p id="status" class="status">Checking the vault…</p>
 
-    <section id="not-running" hidden>
-      <p>Start the Personal Vault desktop app, then reopen this popup.</p>
-      <button id="use-extension" class="plain">Use without the desktop app…</button>
+    <section id="setup" hidden>
+      <p>Your passwords are kept encrypted in this browser.</p>
+      <button id="create">Create a vault</button>
     </section>
 
-    <section id="locked" hidden>
-      <button id="unlock">Unlock in app</button>
-    </section>
-
-    <!-- extension-only mode -->
-    <section id="ext-setup" hidden>
-      <p>No vault in this browser yet.</p>
-      <button id="ext-create">Create a vault</button>
-    </section>
-
-    <form id="ext-unlock" autocomplete="off" hidden>
-      <select id="ext-profile"></select>
-      <input id="ext-password" type="password" placeholder="Master password" />
-      <button id="ext-unlock-button" type="submit">Unlock</button>
+    <form id="unlock-form" autocomplete="off" hidden>
+      <select id="profile"></select>
+      <input id="password" type="password" placeholder="Master password" />
+      <button id="unlock-button" type="submit">Unlock</button>
     </form>
 
-    <p id="ext-sync" class="hint" hidden></p>
-
-    <section id="unpaired" hidden>
-      <p>This browser is not paired with the desktop app yet.</p>
-      <button id="pair">Pair this browser</button>
-      <p id="pair-code" class="code" hidden></p>
-      <p id="pair-hint" class="hint" hidden>
-        Click <strong>Pair</strong> in the desktop app only if it shows this same code.
-      </p>
-    </section>
+    <p id="sync" class="hint" hidden></p>
 
     <p id="insecure" class="warn" hidden>This page is not secure (http).</p>
 
@@ -58,7 +39,7 @@
       </div>
     </section>
 
-    <form id="add" autocomplete="off">
+    <form id="add" autocomplete="off" hidden>
       <h2>Add a login for this site</h2>
       <input id="add-username" type="text" placeholder="Username" />
       <div class="row">

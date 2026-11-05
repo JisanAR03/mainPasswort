@@ -1,5 +1,11 @@
 # Milestones
 
+> **2026-11-05:** this is the plan the desktop-and-extension design was built to (M0 to M6, all
+> built). The product is now the browser extension alone (ADR-012, ADR-013): M1 to M3 and the
+> desktop parts of M5 and M6 describe code that has been removed; their task cards in
+> `docs/tasks/` remain as the history. What the extension does and how it is tested is in
+> `docs/specs/architecture.md`.
+
 > Source: design pack v0.1, sections 10–12. Status: **G0 passed 2026-10-15; M0–M3 built,
 > self-reviewed and merged on 2026-10-15; M4 and M5 built, self-reviewed and merged on
 > 2026-10-16 — owner checks pending at G1, G2, G3 and G4. The M4/M5 merge carries no

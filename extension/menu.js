@@ -49,7 +49,7 @@ async function fill(login, item) {
   item.disabled = false;
   const code = reply.error ? reply.error.code : "internal";
   if (code === "url_changed") say("The page changed. Click the field again.");
-  else if (code === "locked") say("The vault locked. Unlock it in the desktop app.");
+  else if (code === "locked") say("The vault locked. Unlock it, then click the field again.");
   else say(`Could not fill (${code}).`);
 }
 
@@ -63,14 +63,15 @@ async function render() {
       button(login.title, login.username, (item) => fill(login, item));
     }
   } else if (state === "locked") {
-    button("Unlock Personal Vault", "Opens the desktop app", async () => {
+    button("Unlock Personal Vault", "Opens the unlock page", async () => {
       await send("menu_unlock");
-      say("Unlock in the desktop app, then click the field again.");
+      say("Unlock it in the tab that opened, then click the field again.");
     });
-  } else if (state === "not_paired") {
-    say("This browser is not paired. Click the Personal Vault toolbar icon to pair it.");
-  } else if (state === "app_not_running") {
-    say("Start the Personal Vault desktop app to fill logins here.");
+  } else if (state === "no_vault") {
+    button("Set up Personal Vault", "Opens the setup page", async () => {
+      await send("menu_unlock");
+      say("Create your vault in the tab that opened, then click the field again.");
+    });
   }
 }
 

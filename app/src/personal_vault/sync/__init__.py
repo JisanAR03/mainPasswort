@@ -1,1 +1,1 @@
-"""Google Drive sync. Never imports core.vault (enforced by import-linter)."""
+"""The sync decision table and the sync state record."""

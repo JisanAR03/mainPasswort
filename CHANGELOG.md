@@ -5,10 +5,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-0.1.0 is the desktop app, the browser extension and Drive sync, built through milestone M6.
-Not released: gates G2 (the `[S]` read-through) and G4 (the two-device Drive test) are open,
-and no outside security review has been done. Each milestone below has a card in
-[docs/tasks/](docs/tasks/) saying what it built and what proves it.
+**2026-11-05: the product is the browser extension alone** (ADR-012, ADR-013). The desktop app
+described below was removed; its entries stay as the history of how this was built. Not released:
+gate G2 (the `[S]` read-through) is open and no outside security review has been done. Each
+milestone below has a card in [docs/tasks/](docs/tasks/) saying what it built and what proves it.
+
+### Removed
+
+- The desktop app (2026-11-05, [EXT-01](docs/tasks/EXT-01-remove-desktop-app.md)): the Qt windows,
+  the native-messaging host and pairing, the desktop sync engine, packaging, and the extension's
+  desktop mode and `nativeMessaging` permission. The Python vault reader/writer and the sync
+  decision table stay as a **reference implementation used only by the tests** (`app/`), and
+  pykeepass is now a development dependency only, so the shipped extension contains no GPL code.
+  Gone with it and not yet rebuilt in the extension: restoring a backup from the interface, changing
+  the master password, importing a file, merging both sides of a conflict, plaintext export.
+- Nothing outside the repository was touched: an installed desktop app, its data folder and its
+  native-host registry keys stay until the owner removes them.
+
+### Changed
+
+- The extension no longer says "start the desktop app" anywhere. Before the first vault exists, a
+  password field's menu offers **Set up Personal Vault**; **Unlock Personal Vault** brings the vault
+  page forward (or opens it) instead of calling `chrome.action.openPopup()`. A fresh install goes
+  straight to creating a vault; there is no mode switch.
+- The extension ID, the IndexedDB schema and every `chrome.storage` key are unchanged, so a browser
+  that already runs the extension keeps its vaults, profiles and sync state.
+  `app/tests/e2e/test_upgrade.py` seeds the previous version's stored format; the real previous
+  extension was also run against the new one once by hand (12 checks, in Chromium, Chrome and Brave).
+- CI: no Qt, no import-linter; the lint job runs the vendored-code and no-console checks; the e2e job
+  installs KeePassXC so the extension's files are opened in it.
+- Tests: the browser tests that used the desktop app now use the extension's own vault, and three
+  desktop-only invariants (a corrupted download is never adopted, a first link never overwrites, Drive
+  gets exactly the verified bytes) were ported to the browser. 99 Python tests (was 387, with the
+  desktop suite) and 74 browser tests in each of Chromium, Chrome and Brave (was 71).
 
 ### Added
 

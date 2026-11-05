@@ -1,98 +1,90 @@
-# Browser extension and native messaging protocol
+# Extension messaging and the fill procedure
 
-> Source: design pack v0.1, section 8. Status: accepted at gate G0 (2026-10-15).
+> Rewritten 2026-11-05 (ADR-012). The native-messaging protocol, its framing, the pairing key and
+> the local socket are gone with the desktop app (ADR-013); this document is the extension's
+> internal messaging.
 
-The extension is a thin remote control. It asks the desktop app for logins that match the
-current tab, and fills one password after you click. It stores no vault data, and the
-protocol has no message that returns more than one password.
+The extension is a Manifest V3 extension in plain JavaScript. Its parts talk through
+`chrome.runtime` messages. The service worker (`background.js`) accepts each message by **where it
+comes from, as the browser reports it** (the `MessageSender`), never by what the message claims.
+Anything else is answered `bad_request`.
 
-## Extension (Manifest V3, plain JavaScript)
+## Who may send what
 
-| Piece | File | Job |
+| Sender (as the browser reports it) | Messages | Answered with |
 | --- | --- | --- |
-| Manifest | `manifest.json` | Permissions: `nativeMessaging`, `activeTab`, `scripting`, `storage`. A fixed key keeps the extension ID stable during development. |
-| Service worker | `background.js` | Owns the native port, reads the active tab's URL, injects the fill |
-| Popup | `popup.html`, `popup.js` | Lists matches, with fill buttons, lock and unlock buttons, and an "add login for this site" form |
-| Fill function | `fill.js` | Injected on click into the top frame only; fills visible fields, never submits |
-| Save detector (M4b) | `detect.js` | Content script that notices a submitted login; needs access to all sites |
-| Browser shim | `api.js` | Wraps `chrome.*` so Firefox's `browser.*` can be added later |
+| The toolbar popup (`popup.html`) | `status`, `get_logins`, `fill`, `lock`, `unlock`, `save_login`, `generate`, `pending_save`, `resolve_save`, `set_offer_to_save`, and the `ext_*` messages | A result, or `{ok: false, error: {code}}` |
+| The vault page (`vault.html`) | The `ext_*` messages: `ext_state`, `ext_create_profile`, `ext_rename_profile`, `ext_delete_profile`, `ext_unlock`, `ext_lock`, `ext_list`, `ext_get`, `ext_save_entry`, `ext_delete_entry`, `ext_generate`, `ext_export`, `ext_settings`, `ext_connect`, `ext_disconnect`, `ext_sync_now`, `ext_choose`, `ext_drive_list`, `ext_drive_open` | A result, or an error code |
+| A content script in the top frame of an `http(s)` tab | `menu_open`, `menu_close`, `prompt_open`, `login_submitted`, `username_submitted` | Only a token, a height and booleans: **never a title, a username or a password** |
+| `menu.html` framed in a tab | `menu_data`, `menu_fill`, `menu_unlock`, `menu_dismiss` | Only with the one-time token handed out for that tab |
+| `prompt.html` framed in a tab | `prompt_data`, `prompt_action` | Only with the token of the pending save for that tab |
+| The offscreen document (`offscreen.html`) | `engine_online` (the network is back) | Nothing |
 
-M4a needs no access to any website until you click, because `activeTab` grants access to that
-one tab. M4b's save detection needs permission to read all sites, so it is a separate step
-with its own approval.
+The engine (`engine.js`) answers messages with `target: "engine"` from the service worker
+(`sender.url` must be `background.js`); a message from an extension page or a web page is refused.
+There is no `externally_connectable` and no `onMessageExternal`: no other extension and no web
+page can message this one.
 
-## Native host
+Error codes in replies: `locked`, `no_vault`, `no_match`, `url_mismatch`, `url_changed`,
+`bad_request`, `bad_password`, `invalid`, `not_found`, `save_failed`, `internal`, plus the sync
+codes `no_client_id`, `sign_in_cancelled`, `reconnect`, `wrong_scope`, `missing`, `unreadable`.
+Unknown message types are rejected, never ignored. A reply carries a code only: no message,
+stack or value ever echoes an entry field, the master password, a key or a token.
 
-- Name `com.personalvault.host`, type `stdio`. `allowed_origins` lists only our extension ID.
-- `scripts/install_native_host.py` writes the host manifest for Chrome and Brave on your OS.
-  The exact paths are recorded in `docs/setup-browser.md`.
-- The host holds no state. It reads one framed message, forwards it to the app's local
-  socket, and writes back the reply.
-- Framing: a 4-byte length in native byte order, then UTF-8 JSON. Chrome caps host-to-browser
-  messages at 1 MB. Our host rejects requests over 16 KB, and our replies stay under 64 KB.
-- Local socket: a Qt local socket (a named pipe on Windows, a Unix socket elsewhere) that
-  only your OS user can read.
+## Manifest
 
-## Message envelope
+| Item | Value | Why |
+| --- | --- | --- |
+| `permissions` | `activeTab`, `scripting`, `storage`, `offscreen`, `alarms`, `identity` | fill and menu injection; storage; the engine's document; timers that outlive the worker; Google sign-in |
+| `optional_permissions` | `idle` | lock when the screen locks; asked for on a click |
+| `host_permissions` | `http://*/*`, `https://*/*` | the menu and the save prompt work on every site; no `file://` or other schemes |
+| `content_scripts` | `detect.js`, `inline.js`, top frame only, `document_end` | the detector and the menu |
+| `web_accessible_resources` | `menu.html`, `prompt.html`, for `http(s)` pages | so the content script can frame them |
+| `content_security_policy` | `script-src 'self' 'wasm-unsafe-eval'; object-src 'self'` | WebAssembly for Argon2 and nothing else new |
+| `commands` | `lock-vault` (suggested Alt+Shift+L) | lock from the keyboard |
+| `key` | fixed | pins the extension ID, which is the origin of the stored data |
 
-```json
-{ "v": 1, "id": "8f14e45f-...", "type": "get_logins", "pairing_key": "base64...",
-  "payload": { "url": "https://github.com/login" } }
-
-{ "v": 1, "id": "8f14e45f-...", "ok": false, "error": { "code": "locked" } }
-```
-
-Error codes: `locked`, `not_paired`, `no_match`, `url_mismatch`, `bad_request`, `too_large`,
-`rate_limited`, `app_not_running`, `internal`. Unknown fields or types are rejected, never
-ignored.
-
-## Messages
-
-| Type | Needs pairing | Payload | Returns | Rules |
-| --- | --- | --- | --- | --- |
-| `hello` | No | Extension version | App version, `locked` or `unlocked`, profile name | No vault data |
-| `pair_request` | No | New 32-byte key, browser name | `paired: true` | You confirm in the desktop app; both sides show the same 6-character code; 60-second timeout |
-| `show_unlock` | No | None | `shown: true` | Brings the desktop unlock window forward |
-| `get_logins` | Yes | Tab URL | Up to 20 of `{id, title, username}` | Matching rules from the [data model](data-model.md#site-matching-rules) |
-| `get_secret` | Yes | Entry ID, tab URL | `{username, password}` | The app re-matches the URL against that entry; 10 per minute |
-| `save_login` | Yes | URL, username, password, optional title | New entry ID | Always creates; never overwrites |
-| `update_password` | Yes | Entry ID, URL, new password | Entry ID | URL must match; the old password goes to history |
-| `generate_password` | No | Optional length | Password | Generator only, no vault access |
-| `lock` | Yes | None | None | Locks the vault |
-
-There is deliberately no message to list all entries, search by free text, export, or change
-settings.
+There is no `nativeMessaging` permission: nothing talks to another program.
 
 ## Fill procedure
 
-1. You click the toolbar icon or press the shortcut. The service worker reads the active
-   tab's URL itself; the page never supplies it.
-2. `get_logins` returns the matches, and the popup shows titles and usernames.
-3. You click one. The service worker re-reads the tab URL and aborts if it changed since
-   step 1.
-4. `get_secret` returns that login. The service worker injects `fill.js` into frame 0, with
-   the username and password as arguments.
-5. `fill.js` fills only visible fields (non-zero size, not hidden, not transparent), fires
-   `input` and `change` events, and does not submit.
-6. The service worker drops its references, and the popup closes.
+1. The user focuses a username or password field. `inline.js` asks the service worker
+   (`menu_open`) whether to show a menu.
+2. The service worker asks the engine for the logins that match `sender.url` (the page never
+   supplies a URL) and, if there are any, stores `{token, url, documentId, logins}` in
+   `storage.session` and returns the token and a height. If the vault is locked, or there is no
+   vault yet, it returns a one-row menu that opens the unlock or set-up page, but only on a
+   password field or next to one.
+3. `inline.js` frames `menu.html#token` in a closed shadow root. The frame lists titles and
+   usernames. A trusted click in it sends `menu_fill`.
+4. The service worker re-reads the tab URL and refuses if it changed since step 2, asks the
+   engine for that one login (the engine re-matches the URL against the entry, I4) and runs
+   `fillLogin` in **that exact document** (`documentIds`), so a navigation in between means no
+   fill rather than a fill into whatever loaded since.
+5. `fillLogin` fills only visible fields (non-zero size, not hidden, not transparent), fires
+   `input` and `change`, and does not submit. It also fills the username alone on the first
+   screen of a two-step login.
+6. The service worker drops its references and closes the menu.
 
-## Save and update (M4b)
+The toolbar popup does the same with a button per login (`fill`).
 
-1. `detect.js` notices a submitted form with a password field and sends the candidate to the
-   service worker.
-2. The service worker keeps it in `chrome.storage.session` (memory only) for 2 minutes and
-   shows a badge.
-3. You open the popup and choose Save, Update existing or Dismiss. Nothing is saved without
-   that click.
+## Save and update
 
-## Locked or not running
-
-If the vault is locked, the popup shows "Unlock in app", which sends `show_unlock`. If the
-app is not running, the popup says so and asks you to start it.
+1. `detect.js` notices a sign-in: a form submit, Enter in a login field, or a click on a sign-in
+   labelled button (for logins that use a script and never submit a form); only events the user
+   caused count (`isTrusted`). A username sent on its own is remembered for five minutes so the
+   next screen's password can be paired with it. Forms in iframes are never captured.
+2. `login_submitted` reaches the service worker, which drops it if offers are off, the site is on
+   the "never" list, or the page is plain `http` (other than this machine).
+3. It compares the login with the saved login for the same username: **new** (offer to save),
+   **changed password** (offer to update), or **identical** (offer nothing). The candidate is held
+   in `storage.session` for two minutes.
+4. `prompt.html#token` is framed in the page's top-right corner with the site and username, never
+   the password, and **Save/Update**, **Not now** and **Never for this site**. Nothing is written
+   until a trusted click there. A submit while the vault is locked asks for an unlock first.
 
 ## Making it your primary manager
 
-`docs/setup-browser.md` (M4) will cover: turning off "Offer to save passwords" and autofill
-in Chrome and Brave, disabling other managers' extensions, pinning ours, and setting its
-keyboard shortcut. It must also state the limits: no extension can block another manager's
-prompts, and the browser's own passkey dialogs still appear.
+See [setup-browser.md](../setup-browser.md): turn off the browser's own password saving and
+autofill, switch off other managers' extensions, pin this one. No extension can block another
+manager's prompts, and the browser's own passkey dialogs still appear.

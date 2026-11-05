@@ -1,6 +1,6 @@
 # ADR-002 Stack: Python, PySide6, plain JavaScript
 
-Status: Accepted
+Status: Superseded in part by ADR-012 and ADR-013 (PySide6 and the desktop app are gone)
 Date: 2026-10-15
 
 ## Context

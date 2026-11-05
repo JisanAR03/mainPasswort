@@ -11,10 +11,6 @@ ROOT = Path(__file__).resolve().parents[3]
 EXTENSION_DIR = ROOT / "extension"
 TEST_PAGES = EXTENSION_DIR / "test-pages"
 MANIFEST_PATH = EXTENSION_DIR / "manifest.json"
-BRIDGE_APP = Path(__file__).parent / "bridge_app.py"
-HOST_NAME = "com.personalvault.host"
-# the host the test copy of the extension connects to instead (see conftest)
-E2E_HOST_NAME = "com.personalvault.e2e"
 EXTENSION_ID = "pkmjgefocdecdncjcpdlohfnahebkkpi"
 EXTENSION_ORIGIN = f"chrome-extension://{EXTENSION_ID}"
 POPUP_URL = f"{EXTENSION_ORIGIN}/popup.html"
@@ -152,3 +148,18 @@ def frame_closed(page: Page, name: str, timeout_ms: int = 10_000) -> bool:
         page.wait_for_timeout(100)
         waited += 100
     return True
+
+
+def unlock_page_opened(browser: BrowserContext, timeout_ms: int = 10_000) -> bool:
+    """True once a tab on the extension's own vault page has opened — where
+    "Unlock Personal Vault" sends you. Waiting goes through Playwright so it
+    notices tabs the extension opens by itself."""
+    anchor = browser.pages[0]
+    waited = 0
+    while True:
+        if any(page.url.startswith(f"{EXTENSION_ORIGIN}/vault.html") for page in browser.pages):
+            return True
+        if waited >= timeout_ms:
+            return False
+        anchor.wait_for_timeout(100)
+        waited += 100

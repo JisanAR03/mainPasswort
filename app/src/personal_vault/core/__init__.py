@@ -1,4 +1,1 @@
-"""Core logic: vault, storage, KDF, matching, generator, profiles and settings.
-
-Never imports Qt, sync or bridge (enforced by import-linter).
-"""
+"""The vault: KDBX read and write, storage, key derivation, matching and merge."""

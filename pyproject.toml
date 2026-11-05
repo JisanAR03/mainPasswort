@@ -1,41 +1,26 @@
 [project]
 name = "personal-vault"
 version = "0.1.0"
-description = "Personal Vault: a personal, local-first password manager for the desktop"
+description = "A password manager that lives in the browser extension; this package is the Python reference the extension is tested against"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    "pykeepass>=4.1",
-    "platformdirs>=4",
-    "PySide6>=6.7",
-    "google-auth>=2",
-    "google-auth-oauthlib>=1",
-    "requests>=2",
-]
+# Nothing here ships: the product is the browser extension in extension/. The
+# Python code in app/ is the reference implementation of the vault format used
+# by the tests, so its one library, pykeepass, is a development dependency.
+dependencies = []
 
 [dependency-groups]
 dev = [
     "bandit>=1.7",
     "hypothesis>=6",
-    "import-linter>=2",
     "mypy>=1",
     "pip-audit>=2",
     "playwright>=1.64.0",
     "pre-commit>=3",
+    "pykeepass>=4.1",
     "pytest>=8",
     "pytest-cov>=5",
-    "pytest-qt>=4",
     "ruff>=0.6",
-]
-
-# Packaging only (M6-04). Never a runtime dependency and never inside the
-# shipped app: PyInstaller turns the app into a folder of binaries that the
-# target machine runs without Python or uv. `uv sync` does not install this
-# group, so CI and audits stay as they were; build with
-# `uv run --group build python scripts/build_app.py`.
-build = [
-    "pyinstaller>=6.10",
-    "pyinstaller-hooks-contrib>=2024.9",
 ]
 
 [build-system]
@@ -51,10 +36,9 @@ pythonpath = ["app/src"]
 addopts = "-ra --strict-markers"
 markers = [
     "unit: fast pure-logic tests",
-    "integration: tests that touch files, vaults or subprocesses",
-    "ui: desktop UI tests (pytest-qt)",
-    "security: invariant and canary tests (I1-I10)",
-    "sync: Google Drive sync tests",
+    "integration: tests that touch files or vaults",
+    "security: invariant and canary tests (I1-I3)",
+    "sync: the sync decision table",
     "e2e: browser end-to-end tests (Playwright)",
     "slow: the long crash-during-save loop",
 ]
@@ -72,27 +56,9 @@ mypy_path = "app/src"
 files = ["app/src/personal_vault"]
 
 [[tool.mypy.overrides]]
-# pykeepass and google-auth-oauthlib ship no py.typed marker, so mypy cannot
-# check calls into them at all (google-auth itself is typed and is checked)
-module = ["pykeepass", "pykeepass.*", "google_auth_oauthlib.*"]
+# pykeepass ships no py.typed marker, so mypy cannot check calls into it
+module = ["pykeepass", "pykeepass.*"]
 ignore_missing_imports = true
 
 [tool.bandit]
 exclude_dirs = ["app/tests"]
-
-[tool.importlinter]
-root_packages = ["personal_vault"]
-include_external_packages = true
-
-[[tool.importlinter.contracts]]
-name = "core keeps free of Qt, sync and bridge"
-type = "forbidden"
-source_modules = ["personal_vault.core"]
-forbidden_modules = ["PySide6", "personal_vault.sync", "personal_vault.bridge"]
-
-[[tool.importlinter.contracts]]
-name = "ui talks to core only through services"
-type = "forbidden"
-source_modules = ["personal_vault.ui"]
-forbidden_modules = ["pykeepass", "personal_vault.core"]
-allow_indirect_imports = true
