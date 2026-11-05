@@ -71,6 +71,13 @@
     <section id="view-vault" hidden>
       <div class="columns">
         <div class="main">
+          <nav class="tabs" aria-label="Vault sections">
+            <button type="button" class="tab active" data-tab="logins">Logins</button>
+            <button type="button" class="tab" data-tab="bin">Recycle Bin</button>
+            <button type="button" class="tab" data-tab="health">Password health</button>
+          </nav>
+
+          <div id="pane-logins">
           <div class="row">
             <input id="search" type="search" placeholder="Search logins" />
             <button id="add" type="button">Add login</button>
@@ -88,9 +95,27 @@
                 <button id="f-copy" type="button" class="plain">Copy</button>
               </span>
             </label>
+            <details id="gen-options">
+              <summary>Password generator options</summary>
+              <label>Length <input id="g-length" type="number" min="8" max="128" /></label>
+              <label class="check"><input id="g-upper" type="checkbox" /> Capital letters</label>
+              <label class="check"><input id="g-lower" type="checkbox" /> Small letters</label>
+              <label class="check"><input id="g-digits" type="checkbox" /> Digits</label>
+              <label class="check"><input id="g-symbols" type="checkbox" /> Symbols</label>
+              <label class="check"><input id="g-lookalikes" type="checkbox" /> Leave out look-alike characters (0 O 1 l I)</label>
+              <button id="g-save" type="button" class="plain">Use these from now on</button>
+            </details>
             <label>Web addresses (one per line, http or https)
               <textarea id="f-urls" rows="2"></textarea></label>
             <label class="check"><input id="f-subdomains" type="checkbox" /> Also fill on subdomains</label>
+            <label>One-time code secret (TOTP, optional)
+              <input id="f-otp" type="password" autocomplete="off" spellcheck="false"
+                placeholder="Base32 secret or otpauth:// link" /></label>
+            <div id="f-totp" class="row" hidden>
+              <code id="f-totp-code" aria-live="off"></code>
+              <span id="f-totp-left" class="hint"></span>
+              <button id="f-totp-copy" type="button" class="plain">Copy code</button>
+            </div>
             <label>Notes <textarea id="f-notes" rows="3"></textarea></label>
             <label>Tags (comma separated) <input id="f-tags" type="text" /></label>
             <div class="row">
@@ -98,7 +123,36 @@
               <button id="f-cancel" type="button" class="plain">Cancel</button>
               <button id="f-delete" type="button" class="danger" hidden>Delete</button>
             </div>
+            <details id="f-history" hidden>
+              <summary>Earlier versions of this login</summary>
+              <ul id="f-history-list" class="entries static"></ul>
+              <div id="f-history-view" class="hint" hidden>
+                <div id="hv-title"></div>
+                <div id="hv-username"></div>
+                <div class="row"><code id="hv-password"></code>
+                  <button id="hv-show" type="button" class="plain">Show password</button></div>
+                <div id="hv-urls"></div>
+                <div id="hv-notes"></div>
+              </div>
+            </details>
           </form>
+          </div>
+
+          <div id="pane-bin" hidden>
+            <p class="hint">Deleted logins wait here. Restore one, or remove it for good (it cannot
+              come back from Google Drive either once the change has synced).</p>
+            <div class="row">
+              <button id="bin-empty" type="button" class="danger">Empty the Recycle Bin</button>
+            </div>
+            <ul id="bin-list" class="entries static"></ul>
+          </div>
+
+          <div id="pane-health" hidden>
+            <p class="hint">Checked on this computer only; no password and no hash leaves the vault.
+              Strength is an estimate from the length and the kinds of characters, not a guarantee.</p>
+            <button id="health-run" type="button">Check my passwords</button>
+            <div id="health-out"></div>
+          </div>
         </div>
 
         <aside class="side">
@@ -119,7 +173,16 @@
             <div id="sync-choice" class="row wrap" hidden>
               <button id="choice-mine" type="button">Keep this computer's copy</button>
               <button id="choice-theirs" type="button" class="plain">Take the Google Drive copy</button>
+              <button id="choice-merge" type="button" hidden>Merge both copies</button>
             </div>
+            <form id="sync-rekey" autocomplete="off" hidden>
+              <p class="hint">If you changed this vault's master password on another device, enter the
+                new one here to take the copy on Google Drive.</p>
+              <div class="row">
+                <input id="rekey-password" type="password" placeholder="The new master password" />
+                <button type="submit" class="plain">Use it</button>
+              </div>
+            </form>
             <div id="sync-missing" class="row wrap" hidden>
               <button id="choice-upload" type="button">Upload this vault again</button>
             </div>
@@ -133,6 +196,19 @@
             </form>
             <button id="export" type="button" class="plain">Export encrypted copy (.kdbx)</button>
             <details>
+              <summary>Change the master password</summary>
+              <form id="pw-form" autocomplete="off">
+                <label>Current master password <input id="pw-current" type="password" required /></label>
+                <label>New master password (at least 12 characters)
+                  <input id="pw-new" type="password" minlength="12" required /></label>
+                <label>Repeat the new master password
+                  <input id="pw-repeat" type="password" minlength="12" required /></label>
+                <p class="hint">Other devices and older backups keep the old password until they sync
+                  or are restored; a device that finds the new copy will ask for the new password.</p>
+                <button type="submit" class="plain">Change master password</button>
+              </form>
+            </details>
+            <details>
               <summary>Delete this profile</summary>
               <p class="hint">Deletes this profile's vault, backups and sync state from this browser.
                 Type the profile's name to confirm.</p>
@@ -144,14 +220,64 @@
           </div>
 
           <div class="panel">
+            <h2>Backups</h2>
+            <p class="hint">The vault keeps its last 20 saved versions in this browser. Restoring one
+              keeps the current vault as the newest backup, so it can be undone.</p>
+            <details id="backups">
+              <summary>Show backups</summary>
+              <label>Master password of an older backup (only if you changed the password since it was made)
+                <input id="backup-password" type="password" autocomplete="off" /></label>
+              <ul id="backup-list" class="entries static"></ul>
+            </details>
+          </div>
+
+          <div class="panel">
+            <h2>Import</h2>
+            <details>
+              <summary>Import logins from another password manager</summary>
+              <p class="hint">A CSV file holds your passwords in plain text: delete it as soon as it has
+                been imported. Logins already here (same title, username and site) are skipped.</p>
+              <label>CSV file (Chrome, Brave, Edge, Firefox, Bitwarden, 1Password, LastPass, KeePassXC…)
+                <input id="import-csv-file" type="file" accept=".csv,text/csv" /></label>
+              <button id="import-csv" type="button" class="plain">Import the CSV</button>
+              <label>KeePass file (.kdbx)
+                <input id="import-kdbx-file" type="file" accept=".kdbx" /></label>
+              <label>That file's master password
+                <input id="import-kdbx-password" type="password" autocomplete="off" /></label>
+              <button id="import-kdbx" type="button" class="plain">Import the .kdbx</button>
+            </details>
+          </div>
+
+          <div class="panel">
             <h2>Settings</h2>
             <form id="settings-form" autocomplete="off">
               <label>Google OAuth client ID (a "Web application" client)
                 <input id="s-client" type="text" spellcheck="false" /></label>
               <p class="hint">Authorized redirect URI to register for it: <code id="s-redirect"></code></p>
               <label class="check"><input id="s-idle" type="checkbox" /> Lock when the screen locks</label>
+              <label>Lock after the computer has been idle for
+                <select id="s-idle-minutes">
+                  <option value="0">never</option>
+                  <option value="5">5 minutes</option>
+                  <option value="15">15 minutes</option>
+                  <option value="30">30 minutes</option>
+                  <option value="60">1 hour</option>
+                </select></label>
+              <label>An unlock lasts at most
+                <select id="s-unlock-hours">
+                  <option value="1">1 hour</option>
+                  <option value="2">2 hours</option>
+                  <option value="4">4 hours</option>
+                  <option value="6">6 hours (default)</option>
+                </select></label>
+              <label class="check"><input id="s-offer" type="checkbox" /> Offer to save the logins I sign in with</label>
               <button type="submit" class="plain">Save settings</button>
             </form>
+            <details id="never">
+              <summary>Sites I chose "Never" for</summary>
+              <ul id="never-list" class="entries static"></ul>
+              <button id="never-clear" type="button" class="plain" hidden>Allow all of them again</button>
+            </details>
           </div>
         </aside>
       </div>

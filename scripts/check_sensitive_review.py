@@ -34,6 +34,8 @@ SENSITIVE_FILES = {
     "extension/oauth.js",
     "extension/matching.js",
     "extension/generator.js",
+    "extension/totp.js",
+    "extension/csv.js",
     "extension/vault.js",
     "extension/config.js",
     "extension/manifest.json",

@@ -54,11 +54,25 @@ async function fill(login, item) {
   else say(`Could not fill (${code}).`);
 }
 
+async function suggestPassword(item) {
+  item.disabled = true;
+  const reply = await send("menu_suggest");
+  if (reply.ok) return; // the service worker closes this menu
+  item.disabled = false;
+  const code = reply.error ? reply.error.code : "internal";
+  if (code === "url_changed") say("The page changed. Click the field again.");
+  else if (code === "no_login_field") say("No password field found to fill.");
+  else say(`Could not suggest a password (${code}).`);
+}
+
 async function render() {
   const reply = await send("menu_data");
   if (!reply.ok) return;
-  const { state, logins, insecure } = reply.result;
+  const { state, logins, insecure, suggest } = reply.result;
   $("insecure").hidden = !insecure;
+  if (suggest) {
+    button("Suggest a strong password", "Fills this field and its confirmation", (item) => suggestPassword(item));
+  }
   if (state === "matches") {
     for (const login of logins) {
       button(login.title, login.username, (item) => fill(login, item));

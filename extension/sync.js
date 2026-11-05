@@ -19,7 +19,7 @@ import { BACKOFF_SECONDS, SYNC_INTERVAL_MINUTES, UPLOAD_QUIET_MS } from "./confi
 import { Action, decide } from "./decide.js";
 import * as drive from "./drive.js";
 import * as idb from "./idb.js";
-import { engine, ensureOpen, hooks, importProfile, profiles, updateProfile } from "./local.js";
+import { engine, ensureOpen, hooks, importProfile, profiles, updateProfile, updateUnlockHash } from "./local.js";
 import * as oauth from "./oauth.js";
 
 const VAULT_NAME = "vault.kdbx";
@@ -41,10 +41,11 @@ const MESSAGES = {
   no_client_id: "No Google OAuth client ID is set (Settings). Your changes are saved on this computer.",
   wrong_scope: "Google did not grant Drive access. Connect again and allow it.",
   access_denied: "Google Drive refused access to the vault file.",
-  conflict: "Both copies changed since the last sync: choose which one to keep.",
+  conflict: "Both copies changed since the last sync: merge them, or choose which one to keep.",
   missing: "The vault file is missing or in the bin on Google Drive.",
   first_link: "A vault for this profile is already on Google Drive: keep this one, or take that one.",
-  unreadable: "The copy on Google Drive could not be opened with this vault's password; nothing was adopted.",
+  unreadable:
+    "The copy on Google Drive could not be opened with this vault's password; nothing was adopted. If you changed the master password on another device, enter the new one.",
   changed: "The vault changed while syncing; trying again.",
   error: "Sync failed. Your change is saved on this computer.",
 };
@@ -165,7 +166,7 @@ async function profileOf(profileId) {
 }
 
 // Runs one sync for an unlocked, connected profile and records its status.
-export async function runSync(profileId, choice = null) {
+export async function runSync(profileId, choice = null, password = null) {
   if (running.has(profileId)) return status(profileId);
   const profile = await profileOf(profileId);
   if (!profile) return null;
@@ -175,7 +176,7 @@ export async function runSync(profileId, choice = null) {
   running.add(profileId);
   try {
     await setStatus(profileId, "syncing", { lastAttemptAt: now() });
-    const outcome = await guarded(profile, choice);
+    const outcome = await guarded(profile, choice, password);
     return await finish(profileId, outcome);
   } finally {
     running.delete(profileId);
@@ -206,13 +207,13 @@ async function finish(profileId, outcome) {
   });
 }
 
-async function guarded(profile, choice) {
+async function guarded(profile, choice, password) {
   const retryable = (state, failed) => Object.assign(new Outcome(state, { failed }), { retryable: true });
   let token;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       token = await oauth.accessToken(profile.id, profile.googleEmail);
-      return await syncOnce(profile.id, token, choice);
+      return await syncOnce(profile.id, token, choice, password);
     } catch (error) {
       if (error instanceof oauth.AuthError) return new Outcome(error.code, { failed: "sign-in" });
       if (error instanceof drive.DriveError) {
@@ -263,9 +264,9 @@ async function remoteFile(token, profileId, state) {
   return drive.findVaultFile(token, profileId);
 }
 
-async function syncOnce(profileId, token, choice) {
+async function syncOnce(profileId, token, choice, password = null) {
   const state = (await idb.get("sync", profileId)) || null;
-  if (choice) return resolve(profileId, token, state, choice);
+  if (choice) return resolve(profileId, token, state, choice, password);
   const local = await localState(profileId, state);
   if (!local.exists) return new Outcome("error", { failed: "read" });
   const remote = await remoteFile(token, profileId, state);
@@ -292,7 +293,7 @@ async function syncOnce(profileId, token, choice) {
 
 // --- the owner's choices: conflict, first link, missing file -------------------------
 
-async function resolve(profileId, token, state, choice) {
+async function resolve(profileId, token, state, choice, password) {
   const local = await localState(profileId, state);
   if (!local.exists) return new Outcome("error", { failed: "read" });
   if (choice === "keep_mine" || choice === "upload") {
@@ -307,17 +308,46 @@ async function resolve(profileId, token, state, choice) {
   if (choice === "take_theirs") {
     const kept = state && state.conflict && state.conflict.conflict_id;
     const copy = kept ? await idb.get("conflicts", kept) : null;
-    if (copy) return adoptKept(profileId, token, copy, state);
+    if (copy) return adoptKept(profileId, token, copy, state, password);
     const remote = await remoteFile(token, profileId, state);
     if (!remote || remote.trashed) return new Outcome("missing", { failed: "check" });
-    return download(profileId, token, remote, state, { linkedFrom: state ? undefined : "adopt" });
+    return download(profileId, token, remote, state, { linkedFrom: state ? undefined : "adopt", password });
   }
+  if (choice === "merge") return mergeKept(profileId, token, state);
   return new Outcome("error", { failed: "bad_choice" });
+}
+
+// Both copies, together: their kept copy is merged INTO this vault (the library's
+// own merge: nothing from either side is lost, the newer edit of an entry wins and
+// the older goes to its history, deletions are respected), then the merged vault
+// is published over theirs. Their copy counts as seen only if Drive still holds
+// the very copy that was kept (I6): if it moved on, the conflict comes back.
+async function mergeKept(profileId, token, state) {
+  const kept = state && state.conflict && state.conflict.conflict_id;
+  const copy = kept ? await idb.get("conflicts", kept) : null;
+  if (!copy) return new Outcome("error", { failed: "no_conflict" });
+  let head = null;
+  try {
+    head = await remoteFile(token, profileId, state);
+  } catch {
+    head = null;
+  }
+  const reply = await engine("merge", { bytes: b64(copy.bytes) });
+  if (!reply.ok) return new Outcome("unreadable", { failed: "merge" });
+  const seen = head && !head.trashed && head.md5 === state.conflict.remote_md5;
+  await idb.update("sync", profileId, (current) => ({
+    ...(current || state),
+    ...(seen ? { last_synced_remote_md5: head.md5, last_synced_remote_version: head.version } : {}),
+    local_dirty: true,
+    last_error: null,
+    conflict: null,
+  }));
+  return syncOnce(profileId, token, null);
 }
 
 // Their copy, already kept here after a conflict: adopt it (it must decrypt),
 // then publish it, which is how their version wins on Drive too.
-async function adoptKept(profileId, token, copy, state) {
+async function adoptKept(profileId, token, copy, state, password) {
   let head = null;
   try {
     head = await remoteFile(token, profileId, state);
@@ -327,6 +357,7 @@ async function adoptKept(profileId, token, copy, state) {
   const reply = await engine("adopt", {
     profileId,
     bytes: b64(copy.bytes),
+    password: password || undefined,
     sync: {
       last_synced_remote_md5: head ? head.md5 : state.last_synced_remote_md5,
       last_synced_remote_version: head ? head.version : state.last_synced_remote_version,
@@ -336,6 +367,7 @@ async function adoptKept(profileId, token, copy, state) {
     },
   });
   if (!reply.ok) return new Outcome("unreadable", { failed: "adopt" });
+  if (reply.result.passwordHash) await updateUnlockHash(profileId, reply.result.passwordHash);
   return syncOnce(profileId, token, null);
 }
 
@@ -403,7 +435,7 @@ async function record(profileId, remote, { sha256: localSha, folderId, linkedFro
 
 // --- download and adoption (I7) ---------------------------------------------------
 
-async function download(profileId, token, remote, state, { linkedFrom } = {}) {
+async function download(profileId, token, remote, state, { linkedFrom, password } = {}) {
   const bytes = await drive.download(token, remote.id);
   const sums = await engine("digest", { bytes: b64(bytes) });
   if (!sums.ok || (remote.md5 && sums.result.md5 !== remote.md5)) {
@@ -412,6 +444,7 @@ async function download(profileId, token, remote, state, { linkedFrom } = {}) {
   const reply = await engine("adopt", {
     profileId,
     bytes: b64(bytes),
+    password: password || undefined,
     sync: {
       drive_file_id: remote.id,
       drive_folder_id: (state && state.drive_folder_id) || remote.parentId,
@@ -426,6 +459,7 @@ async function download(profileId, token, remote, state, { linkedFrom } = {}) {
   });
   // I7: a file that does not open with this vault's key replaces nothing
   if (!reply.ok) return new Outcome("unreadable", { failed: "adopt" });
+  if (reply.result.passwordHash) await updateUnlockHash(profileId, reply.result.passwordHash);
   return new Outcome("synced", { adopted: true });
 }
 
@@ -579,9 +613,11 @@ export async function openFromDrive(fileId, name, password) {
   }
 }
 
-export async function choose(profileId, choice) {
-  if (!["keep_mine", "take_theirs", "upload"].includes(choice)) {
+// `password` (take_theirs only) is the vault's NEW master password, when the copy
+// on Drive was saved under one that changed on another device.
+export async function choose(profileId, choice, password = null) {
+  if (!["keep_mine", "take_theirs", "upload", "merge"].includes(choice)) {
     return { ok: false, error: { code: "bad_request" } };
   }
-  return { ok: true, result: await runSync(profileId, choice) };
+  return { ok: true, result: await runSync(profileId, choice, password) };
 }

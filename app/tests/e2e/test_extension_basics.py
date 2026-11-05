@@ -50,7 +50,8 @@ def test_shipped_manifest_asks_only_for_what_the_page_features_need() -> None:
     assert manifest["content_security_policy"] == {
         "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
     }
-    assert set(manifest["commands"]) == {"lock-vault"}
+    # Alt+Shift+L locks; Alt+Shift+P opens the toolbar popup (browsers may reassign either)
+    assert set(manifest["commands"]) == {"lock-vault", "_execute_action"}
     assert manifest["host_permissions"] == web
     assert "optional_host_permissions" not in manifest
     assert manifest["content_scripts"] == [

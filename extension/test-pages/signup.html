@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Create an account</title>
+  </head>
+  <body>
+    <h1>Create an account</h1>
+    <form id="signup" action="?submitted=1" method="get">
+      <label>Email <input id="username" name="username" type="text" autocomplete="username" /></label>
+      <label>Password <input id="password" name="password" type="password" autocomplete="new-password" /></label>
+      <label>Repeat password <input id="confirm" name="confirm" type="password" autocomplete="new-password" /></label>
+      <button id="submit" type="submit">Sign up</button>
+    </form>
+    <script>
+      // what the page's own scripts see, to prove a fill is heard like typing and never submits
+      window.__inputs = 0;
+      window.__submits = 0;
+      for (const id of ["password", "confirm"]) {
+        document.getElementById(id).addEventListener("input", () => { window.__inputs += 1; });
+      }
+      document.getElementById("signup").addEventListener("submit", () => { window.__submits += 1; });
+    </script>
+  </body>
+</html>

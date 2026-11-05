@@ -35,17 +35,33 @@ or export a copy. See [docs/specs/threat-model.md](docs/specs/threat-model.md).
   your click, in the top frame, on the exact site (no look-alike domains), and never submits.
 - **A "Save this login?" / "Update saved password?" prompt** after you sign in, with Save, Not now
   and Never for this site. Works for plain forms, two-step logins and single-page apps.
-- **Lock** with one click or **Alt+Shift+L**; an unlock lasts at most six hours and ends when the
-  browser closes. Optionally lock when the screen locks.
+- **Lock** with one click or **Alt+Shift+L**; an unlock lasts at most six hours (you can choose
+  less) and ends when the browser closes. Optionally lock when the screen locks or after the
+  computer has been idle. **Alt+Shift+P** opens the popup from the keyboard.
 - **Google Drive sync** of the encrypted file with the `drive.file` scope only: it uploads about 10
   seconds after a change, and also on unlock, hourly and when the network returns. Every failure is
   shown and explained; a change is never lost because an upload failed; a copy it has not seen is
   never overwritten.
-- A password **generator**, search, edit and delete (to a Recycle Bin), and an encrypted export.
+- **Suggest a strong password** on sign-up and change-password fields (it fills the field and its
+  confirmation box after your click, and the login is then offered for saving).
+- A password **generator** with options, search, edit, and **earlier versions** of every login (view
+  and restore).
+- A **Recycle Bin** you can look into: restore a login, delete one for good, or empty it.
+- **Backups**: the last 20 saved copies are listed and any of them can be restored (undoable).
+- **Change the master password** (the vault is re-encrypted; another device that finds the new copy
+  asks for the new password).
+- **Import** logins from a CSV (Chrome, Brave, Edge, Firefox, Bitwarden, 1Password, LastPass,
+  KeePassXC…) or a `.kdbx` file; duplicates are skipped.
+- **One-time codes (TOTP)** stored the way KeePassXC stores them: shown on the vault page and
+  copyable from the popup.
+- **Password health**: weak, reused and old passwords, checked offline.
+- **Merge both copies** when two devices changed the vault at once, or keep one side as before.
+- Settings: the sites you chose "Never" for (and a switch to stop offering to save), lock after
+  idle, a shorter unlock time, and the generator's options.
+- An encrypted export (`.kdbx`).
 
-Not included: TOTP codes, passkeys, attachments, shared vaults, a phone app, fill on page load,
-biometrics, breach checks, Firefox, restoring a backup from the interface, changing the master
-password, and importing a file from disk. See [Known limitations](docs/known-limitations.md).
+Not included: passkeys, attachments, shared vaults, a phone app, fill on page load, biometrics,
+breach checks, a plaintext export, and Firefox. See [Known limitations](docs/known-limitations.md).
 
 ## Install
 

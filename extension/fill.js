@@ -110,3 +110,41 @@ export function fillLogin(username, password) {
     password_filled: Boolean(passwordField),
   };
 }
+
+// The fill for a NEW password (a sign-up or change-password form), injected after
+// you click "Suggest a strong password" in the menu ([S]). Same rules as
+// fillLogin: serialized into the page, isolated world, visible fields only,
+// input and change events, never submits, keeps nothing. It fills the field the
+// menu was opened for and any other visible new-password field of the same form
+// (the confirmation box), with the same value, and touches nothing else.
+export function fillNewPassword(password) {
+  const visible = (element) => {
+    if (element.disabled || element.readOnly) return false;
+    const style = getComputedStyle(element);
+    if (style.display === "none") return false;
+    if (style.visibility === "hidden" || style.visibility === "collapse") return false;
+    if (Number.parseFloat(style.opacity) === 0) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+  const anchor = globalThis.__personalVaultField;
+  if (!(anchor instanceof HTMLInputElement) || anchor.type !== "password" || !anchor.isConnected || !visible(anchor)) {
+    return { filled: false, reason: "no_password_field" };
+  }
+  const isNew = (field) => (field.autocomplete || "").toLowerCase().split(/\s+/).includes("new-password");
+  const siblings = anchor.form
+    ? [...anchor.form.querySelectorAll('input[type="password"]')].filter((f) => f !== anchor && isNew(f) && visible(f))
+    : [];
+  globalThis.__personalVaultFilling = true;
+  try {
+    for (const field of [anchor, ...siblings]) {
+      field.focus();
+      field.value = password;
+      field.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+      field.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  } finally {
+    globalThis.__personalVaultFilling = false;
+  }
+  return { filled: true, fields: 1 + siblings.length };
+}

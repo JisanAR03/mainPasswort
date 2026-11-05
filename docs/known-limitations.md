@@ -24,9 +24,16 @@ These are limits of the design, not bugs waiting to be fixed:
 - **Anyone who shares your browser profile.** Profiles are labels, not accounts.
 - **Losing the master password.** There is no recovery, no backdoor and no reset.
 - **An unattended unlocked browser.** An unlock lasts up to **6 hours** (or until the browser
-  closes). "Lock when the screen locks" shortens it; it needs the optional `idle` permission.
-- **A password you paste somewhere.** Copying puts it in the OS clipboard for 30 seconds; the
-  extension clears it afterwards on a best-effort basis.
+  closes). You can choose a shorter time, "Lock when the screen locks" and "Lock after the computer
+  has been idle"; the last two need the optional `idle` permission.
+- **A password you paste somewhere.** Copying puts it in the OS clipboard. After 30 seconds the
+  extension takes it off again, but only if the clipboard still holds it (something you copied
+  meanwhile is left alone); locking does the same at once. To tell, it reads the clipboard then
+  (the `clipboardRead` permission) and keeps only a hash of what it copied; `clipboardWrite` lets
+  it clear without a click. Clipboard managers that keep a history (Windows Win+V) may still hold
+  the copy.
+- **A one-time-code secret kept next to the password.** A TOTP secret in the vault means anyone who
+  opens the vault gets both factors. Keep the secret in a separate vault profile if that matters.
 
 ## Where your data lives
 
@@ -47,22 +54,35 @@ These are limits of the design, not bugs waiting to be fixed:
 
 ## Not in this version
 
-TOTP codes, passkeys, attachments, shared vaults, a phone app, autofill on page load, biometrics,
-breach checks, Firefox, and auto-update. The extension fills only the top frame and only when you
-click a login; logins inside iframes get no menu and are never offered for saving.
+Passkeys, attachments, shared vaults, a phone app, autofill on page load, biometrics, breach
+checks (they would send hash prefixes to an outside service; the owner chose not to), Firefox (the
+engine needs Chrome's `offscreen` API), a plaintext export (the data model says there is none) and
+auto-update. The extension fills only the top frame and only when you click a login; logins inside
+iframes get no menu and are never offered for saving.
 
-**Present in the old desktop app, not here** (ADR-013):
+## Things that work but have limits
 
-- **Restoring a backup from the interface.** The 20 previous copies per profile are kept in the
-  browser's storage, but nothing restores one. The recovery path is Google Drive's version history
-  (`docs/recovery.md`).
-- **Changing the master password.**
-- **Importing a vault or a CSV from disk.** A vault comes in through Google Drive. The encrypted
-  export is the only export; there is no plaintext export.
-- **Merging both sides of a conflict.** The extension offers keep this computer's copy or take
-  Drive's; the other copy stays in Drive's version history.
-- **Emptying the Recycle Bin.** A deleted login stays in the vault until you remove it in
-  KeePassXC.
+- **Changing the master password.** The vault and new backups use the new password at once. Older
+  backups and the copy on another device keep the old one until they sync or are restored: a
+  restore asks for the old password and re-keys the copy to the current one; a device that finds
+  the re-keyed copy on Drive asks for the new password. Forget the new password and nothing opens.
+- **Importing.** A CSV holds your passwords in plain text on disk: delete it afterwards. Only
+  `http`/`https` addresses are kept (an app link is dropped, the login stays); logins already here
+  (same title, username and site) are skipped. A `.kdbx` import leaves out its Recycle Bin and the
+  old desktop app's hidden `.app` group.
+- **Password health** estimates strength from the length and the kinds of characters and a short
+  list of the most common passwords. It is a hint, not a guarantee, and it does not know about
+  breaches.
+- **Merging after the other device changed the master password** cannot open its copy. The panel
+  then asks for the new password and takes that copy; what you changed here since the last sync
+  stays in the newest backup (Backups → Restore) and can be brought back from there.
+- **Merging a conflict** uses the library's merge: both sides' logins survive, the newer edit of
+  a login wins and the older goes to its history, and a login deleted for good on one side stays
+  deleted. If Drive changed again after the copy was kept, the conflict comes back instead.
+- **Lock after idle** follows the operating system's idea of idle (keyboard and mouse), not use of
+  the extension.
+- **The keyboard shortcuts** (Alt+Shift+L, Alt+Shift+P) can be taken by another extension or the
+  browser; change them at `chrome://extensions/shortcuts` (Brave: `brave://extensions/shortcuts`).
 
 ## Behaviour that is deliberate but will surprise you
 
