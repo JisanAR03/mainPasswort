@@ -468,6 +468,7 @@ export async function connect(profileId) {
     const token = await oauth.signIn(profileId);
     const email = await drive.accountEmail(token);
     if (!email) return { ok: false, error: { code: "bad_response" } };
+    await relink(profileId, profile.googleEmail, email);
     await updateProfile(profileId, { googleEmail: email });
   } catch (error) {
     const code = error && error.code ? error.code : "internal";
@@ -477,10 +478,33 @@ export async function connect(profileId) {
   return { ok: true, result: await runSync(profileId) };
 }
 
+// What was synced before (which Drive file, which versions) is kept across a
+// Disconnect, tagged with the account it belonged to. Connecting the SAME account
+// again resumes from it — decide() still compares everything, so a change on
+// either side is an upload, a download or a conflict, never a blind overwrite.
+// Another account's Drive is not this file's Drive, so that starts over with the
+// first-link question (ADR-010).
+async function relink(profileId, linkedEmail, email) {
+  const state = await idb.get("sync", profileId);
+  if (!state) return;
+  const before = linkedEmail || state.disconnected_email;
+  if (before && before !== email) {
+    await idb.remove("sync", profileId);
+  } else if (state.disconnected_email) {
+    const { disconnected_email: _gone, ...resumed } = state;
+    await idb.put("sync", resumed);
+  }
+}
+
 export async function disconnect(profileId) {
+  const profile = await profileOf(profileId);
   await oauth.dropToken(profileId);
   await updateProfile(profileId, { googleEmail: null });
-  await idb.remove("sync", profileId); // a later connect links again (ADR-010)
+  if (profile && profile.googleEmail) {
+    await idb.update("sync", profileId, (state) =>
+      state ? { ...state, disconnected_email: profile.googleEmail } : undefined,
+    );
+  }
   cancel(profileId, "sync-retry");
   cancel(profileId, "sync-due");
   return { ok: true, result: await setStatus(profileId, "off", { lastSuccessAt: null }) };

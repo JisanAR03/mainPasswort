@@ -3,8 +3,9 @@
 // through the service worker (ext_* messages); this page holds an entry only
 // while its form is open and clears every field when the vault locks.
 
+import { CLIPBOARD_CLEAR_MS } from "./config.js";
+
 const $ = (id) => document.getElementById(id);
-const CLIPBOARD_CLEAR_MS = 30 * 1000;
 
 let state = null; // the last ext_state reply
 let editing = null; // the entry id being edited, or "" for a new one
@@ -253,14 +254,28 @@ $("f-generate").addEventListener("click", async () => {
   if (reply.ok) $("f-password").value = reply.result.password;
 });
 
+async function sha256Hex(value) {
+  const sha = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+  return [...sha].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Copy here (it needs this click), but the clearing is done by the vault engine,
+// which only clears what it was told was copied — and keeps going if this page
+// is closed. This page tells it the SHA-256 of the text, never the text.
 $("f-copy").addEventListener("click", async () => {
+  const value = $("f-password").value;
   try {
-    await navigator.clipboard.writeText($("f-password").value);
-    notice("Password copied; the clipboard is cleared in 30 seconds.");
-    setTimeout(() => navigator.clipboard.writeText("").catch(() => {}), CLIPBOARD_CLEAR_MS);
+    await navigator.clipboard.writeText(value);
   } catch {
     notice("The browser did not allow copying.");
+    return;
   }
+  const armed = await send("ext_clipboard_arm", { digest: await sha256Hex(value) });
+  notice(
+    armed.ok
+      ? `Password copied; it is taken off the clipboard in ${Math.round(CLIPBOARD_CLEAR_MS / 1000)} seconds.`
+      : "Password copied, but it could not be scheduled to leave the clipboard: clear it yourself.",
+  );
 });
 
 $("entry-form").addEventListener("submit", async (event) => {

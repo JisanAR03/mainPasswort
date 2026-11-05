@@ -30,18 +30,28 @@
   const PROMPT_TTL_MS = 2 * 60 * 1000;
   const USERNAME_HINT = /user|email|e-mail|login|account|identifier|phone|mobile/i;
 
-  const host = document.createElement("personal-vault");
-  const shadow = host.attachShadow({ mode: "closed" });
-  const style = document.createElement("style");
   // !important on :host wins over any page rule aimed at the host element
-  style.textContent = `
+  const LAYER_STYLE = `
     :host { all: initial !important; position: fixed !important; top: 0 !important;
       left: 0 !important; width: 0 !important; height: 0 !important; display: block !important;
       opacity: 1 !important; visibility: visible !important; z-index: 2147483647 !important; }
     iframe { position: fixed; border: 0; border-radius: 8px; background: transparent;
       box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22); color-scheme: normal; }
   `;
-  shadow.append(style);
+
+  // A host element with a closed shadow root: the page's scripts can reach
+  // neither it nor the frames inside it.
+  function createLayer() {
+    const host = document.createElement("personal-vault");
+    const shadow = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = LAYER_STYLE;
+    shadow.append(style);
+    return { host, shadow };
+  }
+
+  const promptLayer = createLayer(); // the save prompt: always on the page itself
+  const menuLayer = createLayer(); // the menu: inside the open dialog when the field is in one
 
   let menu = null; // { frame, field, token }
   let opening = null; // the field a menu is being asked for
@@ -57,9 +67,25 @@
     }
   }
 
-  function attach(frame) {
-    shadow.append(frame);
-    if (!host.isConnected) document.documentElement.append(host);
+  // The open modal dialog or popover the field sits in, if any (the top layer).
+  function topLayerAncestor(field) {
+    for (let node = field; node; node = deep.composedParent(node)) {
+      for (const selector of [":modal", ":popover-open"]) {
+        try {
+          if (node.matches(selector)) return node;
+        } catch {
+          // this browser does not know the selector: the field cannot be in one
+        }
+      }
+    }
+    return null;
+  }
+
+  // Put the frame in a layer, first moving the layer to `container` if it is
+  // elsewhere (moving a host reloads the frames in it, so it is done before any).
+  function attach(layer, frame, container = document.documentElement) {
+    if (layer.host.parentNode !== container) container.append(layer.host);
+    layer.shadow.append(frame);
   }
 
   function visible(element) {
@@ -114,7 +140,15 @@
     const left = Math.min(Math.max(rect.left, 8), Math.max(window.innerWidth - width - 8, 8));
     let top = rect.bottom + 4;
     if (top + height > window.innerHeight && rect.top - height - 4 > 0) top = rect.top - height - 4;
-    Object.assign(menu.frame.style, { left: `${left}px`, top: `${top}px`, width: `${width}px` });
+    // position: fixed is measured from the page's viewport, unless an ancestor of
+    // the menu (a dialog centred with a transform) is its containing block: the
+    // host sits at the anchor's top-left, so its own position is the offset
+    const anchor = menuLayer.host.getBoundingClientRect();
+    Object.assign(menu.frame.style, {
+      left: `${left - anchor.left}px`,
+      top: `${top - anchor.top}px`,
+      width: `${width}px`,
+    });
   }
 
   function schedulePlace() {
@@ -147,7 +181,7 @@
     frame.src = `${MENU_URL}#${reply.token}`;
     frame.title = "Personal Vault";
     frame.style.height = `${reply.height}px`;
-    attach(frame);
+    attach(menuLayer, frame, topLayerAncestor(field) || document.documentElement);
     menu = { frame, field, token: reply.token };
     globalThis.__personalVaultField = field; // read by fill.js, in this same isolated world
     place();
@@ -192,7 +226,7 @@
     () => {
       // focus moving into the menu frame shows up as focus on our host element
       setTimeout(() => {
-        if (menu && deep.deepActiveElement() !== menu.field && document.activeElement !== host) {
+        if (menu && deep.deepActiveElement() !== menu.field && document.activeElement !== menuLayer.host) {
           closeMenu();
         }
       }, 150);
@@ -243,7 +277,7 @@
       width: `${PROMPT_WIDTH}px`,
       height: `${PROMPT_HEIGHT}px`,
     });
-    attach(frame);
+    attach(promptLayer, frame);
     // the offer lapses with the candidate it is for
     prompt = { frame, token, timer: setTimeout(closePrompt, PROMPT_TTL_MS) };
   }

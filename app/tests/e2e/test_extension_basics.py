@@ -30,11 +30,16 @@ def test_shipped_manifest_asks_only_for_what_the_page_features_need() -> None:
     web = ["http://*/*", "https://*/*"]
     assert manifest["manifest_version"] == 3
     # offscreen, alarms and identity: the vault engine's document, the timers
-    # that outlive the service worker, and Google sign-in. No nativeMessaging:
-    # nothing talks to another program.
+    # that outlive the service worker, and Google sign-in. clipboardRead: the
+    # engine looks at the clipboard 30 seconds after a Copy, so it clears only
+    # a password it copied (the owner approved clipboardRead on 2026-11-05), and
+    # clipboardWrite, without which that clear cannot write.
+    # No nativeMessaging: nothing talks to another program.
     assert sorted(manifest["permissions"]) == [
         "activeTab",
         "alarms",
+        "clipboardRead",
+        "clipboardWrite",
         "identity",
         "offscreen",
         "scripting",
@@ -68,6 +73,7 @@ def test_shipped_config_is_the_real_one() -> None:
     config = (MANIFEST_PATH.parent / "config.js").read_text(encoding="utf-8")
     for line in (
         "export const UNLOCK_HOURS = 6;",
+        "export const CLIPBOARD_CLEAR_MS = 30 * 1000;",
         "export const KDF_MEMORY_MIB = 128;",
         "export const KDF_MIN_MEMORY_MIB = 64;",
         "export const KDF_PARALLELISM = 2;",

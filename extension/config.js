@@ -5,6 +5,10 @@
 // An unlock lasts this long at most, or until the browser closes (ADR-012).
 export const UNLOCK_HOURS = 6;
 
+// A copied password is taken off the clipboard this long after Copy, if the
+// clipboard still holds it (never something else you copied meanwhile).
+export const CLIPBOARD_CLEAR_MS = 30 * 1000;
+
 // Vault strength (docs/specs/data-model.md, D9): Argon2id, 128 MiB, 2 lanes,
 // iterations calibrated so one unlock takes about a second here. A vault with
 // less memory than the minimum is never created.
