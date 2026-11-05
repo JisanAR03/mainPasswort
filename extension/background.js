@@ -20,6 +20,7 @@
 // Every vault request is answered from the vault the extension holds itself
 // (local.js, engine.js); there is no other program to ask.
 import { store } from "./api.js";
+import { UNLOCK_HOURS } from "./config.js";
 import { fillLogin } from "./fill.js";
 import * as local from "./local.js";
 import * as sync from "./sync.js";
@@ -430,6 +431,12 @@ async function handlePopup(message, sender) {
       return fillInto(tab.id, null, message.entryId, message.url);
     }
 
+    case "get_totp": {
+      const tab = await targetTab(sender);
+      if (!tab || tab.url !== message.url) return fail("url_changed");
+      return local.localRequest("get_totp", { entry_id: message.entryId, url: message.url });
+    }
+
     case "lock":
       return local.localRequest("lock", {});
 
@@ -471,6 +478,7 @@ const POPUP_TYPES = new Set([
   "status",
   "get_logins",
   "fill",
+  "get_totp",
   "lock",
   "unlock",
   "save_login",
@@ -511,17 +519,47 @@ const EXT_TYPES = new Set([
 ]);
 const PROMPT_TYPES = new Set(["prompt_data", "prompt_action"]);
 
+// More requests of the same kind as EXT_TYPES (accepted from the vault page and the
+// popup only): management of the open vault. Each maps to one engine operation,
+// except the few with their own handler.
+const VAULT_OPS = {
+  ext_bin_list: "bin_list",
+  ext_bin_restore: "bin_restore",
+  ext_bin_delete: "bin_delete",
+  ext_bin_empty: "bin_empty",
+  ext_backup_list: "backup_list",
+  ext_restore_backup: "restore_backup",
+  ext_history_list: "history_list",
+  ext_history_get: "history_get",
+  ext_history_restore: "history_restore",
+  ext_totp: "totp",
+  ext_import_csv: "import_csv",
+  ext_import_kdbx: "import_kdbx",
+  ext_report: "report",
+};
+const VAULT_PAGE_TYPES = new Set([
+  ...Object.keys(VAULT_OPS),
+  "ext_change_password",
+  "ext_never_remove",
+  "ext_never_clear",
+  "ext_set_offer",
+]);
+
 // --- extension-only mode: the vault page and the popup ----------------------------
 
 const IDLE_PERMISSION = { permissions: ["idle"] };
+const IDLE_CHOICES = [0, 5, 15, 30, 60]; // minutes of no keyboard or mouse use; 0 = never
+const UNLOCK_CHOICES = [1, 2, 4, UNLOCK_HOURS]; // hours; never longer than the default
 
 async function extState() {
   const profiles = await local.profiles();
   const record = await local.unlockedRecord();
-  const { settings = {}, last_profile_id: lastProfileId } = await chrome.storage.local.get([
-    "settings",
-    "last_profile_id",
-  ]);
+  const {
+    settings = {},
+    last_profile_id: lastProfileId,
+    never_save: never,
+    offer_to_save: offer,
+  } = await chrome.storage.local.get(["settings", "last_profile_id", "never_save", "offer_to_save"]);
   const statuses = {};
   for (const profile of profiles) statuses[profile.id] = await sync.status(profile.id);
   return {
@@ -534,7 +572,15 @@ async function extState() {
       settings: {
         googleClientId: settings.googleClientId || "",
         lockOnScreenLock: settings.lockOnScreenLock === true,
+        lockAfterIdleMinutes: IDLE_CHOICES.includes(settings.lockAfterIdleMinutes)
+          ? settings.lockAfterIdleMinutes
+          : 0,
+        unlockHours: UNLOCK_CHOICES.includes(settings.unlockHours) ? settings.unlockHours : UNLOCK_HOURS,
+        generator: await local.generatorOptions(),
       },
+      // sites the save prompt is never shown for: origins only, nothing from a vault
+      neverSave: Array.isArray(never) ? never : [],
+      offerToSave: offer !== false,
       redirectUrl: chrome.identity.getRedirectURL(),
       statuses,
     },
@@ -571,7 +617,20 @@ async function handleExt(message) {
     case "ext_delete_entry":
       return local.vaultOp("delete", { entryId: args.entryId });
     case "ext_generate":
-      return local.localRequest("generate_password", { length: args.length });
+      return local.localRequest("generate_password", args);
+    case "ext_change_password":
+      return local.changePassword(args.password, args.newPassword);
+    case "ext_never_remove": {
+      const { never_save: never = [] } = await store.get("never_save");
+      await store.set({ never_save: never.filter((origin) => origin !== args.origin) });
+      return { ok: true, result: {} };
+    }
+    case "ext_never_clear":
+      await store.set({ never_save: [] });
+      return { ok: true, result: {} };
+    case "ext_set_offer":
+      await store.set({ offer_to_save: args.value === true });
+      return { ok: true, result: {} };
     case "ext_export":
       return local.vaultOp("export", {});
     case "ext_clipboard_arm":
@@ -581,6 +640,12 @@ async function handleExt(message) {
       const next = { ...settings };
       if (typeof args.googleClientId === "string") next.googleClientId = args.googleClientId.trim();
       if (typeof args.lockOnScreenLock === "boolean") next.lockOnScreenLock = args.lockOnScreenLock;
+      if (IDLE_CHOICES.includes(args.lockAfterIdleMinutes)) next.lockAfterIdleMinutes = args.lockAfterIdleMinutes;
+      if (UNLOCK_CHOICES.includes(args.unlockHours)) next.unlockHours = args.unlockHours;
+      if (args.generator && typeof args.generator === "object") {
+        const { length, upper, lower, digits, symbols, excludeLookalikes } = args.generator;
+        next.generator = { length, upper, lower, digits, symbols, excludeLookalikes };
+      }
       await store.set({ settings: next });
       await watchIdle();
       return { ok: true, result: {} };
@@ -599,30 +664,38 @@ async function handleExt(message) {
     }
     case "ext_choose": {
       const profileId = await unlockedProfileId();
-      return profileId ? sync.choose(profileId, args.choice) : fail("locked");
+      return profileId ? sync.choose(profileId, args.choice, args.password) : fail("locked");
     }
     case "ext_drive_list":
       return sync.listDriveVaults();
     case "ext_drive_open":
       return sync.openFromDrive(args.fileId, args.name, args.password);
     default:
+      if (VAULT_OPS[message.type]) return local.vaultOp(VAULT_OPS[message.type], args);
       return fail("bad_request");
   }
 }
 
-// Lock when the OS locks the screen — only if the owner turned it on and
-// granted the optional "idle" permission.
-function onIdleState(state) {
-  if (state === "locked") local.lock();
+// Lock when the OS locks the screen, or after the computer has been idle for the
+// time the owner chose — only if they turned it on and granted the optional
+// "idle" permission (asked for on the settings click).
+async function onIdleState(state) {
+  const { settings = {} } = await store.get("settings");
+  const screen = state === "locked" && settings.lockOnScreenLock === true;
+  const idle = state === "idle" && IDLE_CHOICES.includes(settings.lockAfterIdleMinutes) && settings.lockAfterIdleMinutes > 0;
+  if (screen || idle) local.lock();
 }
 
 async function watchIdle() {
   if (!chrome.idle) return;
   const { settings = {} } = await store.get("settings");
-  const wanted = settings.lockOnScreenLock === true;
+  const minutes = IDLE_CHOICES.includes(settings.lockAfterIdleMinutes) ? settings.lockAfterIdleMinutes : 0;
+  const wanted = settings.lockOnScreenLock === true || minutes > 0;
   const granted = await chrome.permissions.contains(IDLE_PERMISSION);
   chrome.idle.onStateChanged.removeListener(onIdleState);
-  if (wanted && granted) chrome.idle.onStateChanged.addListener(onIdleState);
+  if (!wanted || !granted) return;
+  if (minutes > 0) chrome.idle.setDetectionInterval(Math.max(minutes * 60, 15));
+  chrome.idle.onStateChanged.addListener(onIdleState);
 }
 watchIdle();
 chrome.permissions.onAdded.addListener(watchIdle);
@@ -640,9 +713,8 @@ chrome.commands.onCommand.addListener((command) => {
 async function route(message, sender) {
   if (!message || typeof message.type !== "string") return fail("bad_request");
   const { type } = message;
-  if (EXT_TYPES.has(type) && (fromExtensionPage(sender, "vault.html") || fromExtensionPage(sender, "popup.html"))) {
-    return handleExt(message);
-  }
+  const ownPage = fromExtensionPage(sender, "vault.html") || fromExtensionPage(sender, "popup.html");
+  if ((EXT_TYPES.has(type) || VAULT_PAGE_TYPES.has(type)) && ownPage) return handleExt(message);
   if (type === "engine_online" && fromExtensionPage(sender, "offscreen.html")) {
     await sync.syncUnlocked();
     return { ok: true };

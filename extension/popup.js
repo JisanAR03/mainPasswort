@@ -40,7 +40,15 @@ function renderMatches() {
     const fill = document.createElement("button");
     fill.textContent = "Fill";
     fill.addEventListener("click", () => startFill(match, fill));
-    item.append(who, fill);
+    item.append(who);
+    if (match.has_totp) {
+      const code = document.createElement("button");
+      code.className = "plain";
+      code.textContent = "Copy code";
+      code.addEventListener("click", () => copyCode(match, code));
+      item.append(code);
+    }
+    item.append(fill);
     list.append(item);
   }
 }
@@ -58,6 +66,34 @@ async function startFill(match, button) {
   } else {
     setStatus(`Could not fill: ${reply.error ? reply.error.code : "unknown error"}`);
   }
+}
+
+// The one-time code for this page's own login, to the clipboard. The engine
+// clears it again after the usual time, only if it is still there.
+async function copyCode(match, button) {
+  button.disabled = true;
+  const reply = await send("get_totp", { entryId: match.id, url: pageUrl });
+  button.disabled = false;
+  if (!reply.ok) {
+    setStatus(
+      reply.error && reply.error.code === "url_changed"
+        ? "The page changed since this list loaded. Reopen the popup."
+        : "No one-time code for this login.",
+    );
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(reply.result.code);
+  } catch {
+    setStatus("The browser did not allow copying.");
+    return;
+  }
+  const bytes = new TextEncoder().encode(reply.result.code);
+  const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  await send("ext_clipboard_arm", { args: { digest } });
+  setStatus("Code copied.");
 }
 
 async function renderPending() {

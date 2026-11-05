@@ -21,12 +21,17 @@ import {
   KDF_PARALLELISM,
   KDF_TARGET_MS,
 } from "./config.js";
+import { loginsFromCsv } from "./csv.js";
 import * as idb from "./idb.js";
 import { matchUrls } from "./matching.js";
+import { normalizeOtp, parseOtp, totpCode } from "./totp.js";
 
 const LOGINS = "Logins";
 const RECYCLE_BIN = "Recycle Bin";
 const MAX_HISTORY = 10;
+const MIN_PASSWORD_LENGTH = 12;
+const OTP_FIELD = "otp"; // KeePassXC's name for a one-time-password secret
+const OLD_AFTER_DAYS = 365;
 const SUBDOMAINS_KEY = "PM_MATCH_SUBDOMAINS";
 const EXTRA_URL = /^KP2A_URL_\d+$/;
 const STANDARD_FIELDS = new Set(["Title", "UserName", "Password", "URL", "Notes"]);
@@ -293,6 +298,8 @@ function hostsOf(urls) {
   return hosts;
 }
 
+const hasOtp = (entry) => text(entry.fields.get(OTP_FIELD)).trim() !== "";
+
 function summary(entry) {
   const urls = entryUrls(entry);
   return {
@@ -300,6 +307,7 @@ function summary(entry) {
     title: text(entry.fields.get("Title")),
     username: text(entry.fields.get("UserName")),
     hosts: hostsOf(urls),
+    has_totp: hasOtp(entry),
   };
 }
 
@@ -309,6 +317,7 @@ function fullEntry(entry) {
     password: text(entry.fields.get("Password")),
     urls: entryUrls(entry),
     notes: text(entry.fields.get("Notes")),
+    otp: text(entry.fields.get(OTP_FIELD)),
     tags: [...(entry.tags || [])],
     match_subdomains: subdomains(entry),
     created_at: entry.times.creationTime ? entry.times.creationTime.toISOString() : null,
@@ -339,6 +348,9 @@ function validate(input) {
     if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname) fail();
   }
   if (typeof input.match_subdomains !== "boolean" && input.match_subdomains !== undefined) fail();
+  if (input.otp !== undefined && (typeof input.otp !== "string" || (input.otp.trim() && !parseOtp(input.otp)))) {
+    fail(); // a one-time-password secret that is not a usable time-based secret
+  }
 }
 
 function apply(entry, input) {
@@ -350,6 +362,11 @@ function apply(entry, input) {
   entry.fields.set("Notes", input.notes || "");
   entry.tags = [...(input.tags || [])];
   entry.fields.set(SUBDOMAINS_KEY, input.match_subdomains ? "true" : "false");
+  if (typeof input.otp === "string") {
+    const stored = input.otp.trim() ? normalizeOtp(input.otp, input.title) : null;
+    if (stored) entry.fields.set(OTP_FIELD, kdbxweb.ProtectedValue.fromString(stored));
+    else entry.fields.delete(OTP_FIELD);
+  }
   for (const key of [...entry.fields.keys()]) {
     if (EXTRA_URL.test(key)) entry.fields.delete(key);
   }
@@ -375,7 +392,7 @@ function requireOpen(profileId) {
 // file and its newest backup in one transaction (the IndexedDB version of the
 // desktop's atomic save with read-back check). A failure leaves the stored
 // vault as it was and reloads it, so memory never holds unsaved edits.
-async function save() {
+async function save(reloadHash) {
   const { db, hash, profileId } = requireOpen();
   try {
     normalize(db);
@@ -390,7 +407,8 @@ async function save() {
     return sums;
   } catch (error) {
     const stored = await idb.get("vaults", profileId);
-    if (stored) current = { profileId, hash, db: await load(stored.bytes, hash) };
+    const back = reloadHash || hash; // after a key change the stored file is still under the old key
+    if (stored) current = { profileId, hash: back, db: await load(stored.bytes, back) };
     throw error instanceof EngineError ? new EngineError("save_failed") : error;
   }
 }
@@ -439,7 +457,9 @@ function matches({ url }) {
     .filter((entry) => matchUrls(entryUrls(entry), url, subdomains(entry)))
     .map(summary)
     .sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase()));
-  return { logins: found.map(({ id, title, username }) => ({ id, title, username })) };
+  return {
+    logins: found.map(({ id, title, username, has_totp: totp }) => ({ id, title, username, has_totp: totp })),
+  };
 }
 
 function secret({ entryId, url }) {
@@ -544,8 +564,12 @@ async function updatePassword({ entryId, url, newPassword }) {
 
 // Sync: take a file from Drive. It must open with this vault's key before it
 // replaces anything (I7); the replaced file becomes the newest backup.
-async function adopt({ profileId, bytes: bytesB64, sync }) {
-  const { hash } = requireOpen(profileId);
+// The file may have been re-keyed on another device (its master password
+// changed): then `password` is the new one, the file must open with it, and the
+// new key replaces this unlock's.
+async function adopt({ profileId, bytes: bytesB64, sync, password }) {
+  const open = requireOpen(profileId);
+  const hash = typeof password === "string" && password ? await passwordHash(password) : open.hash;
   const bytes = fromB64(bytesB64);
   const db = await load(bytes, hash);
   const sums = await digests(bytes);
@@ -556,7 +580,7 @@ async function adopt({ profileId, bytes: bytesB64, sync }) {
     last_synced_local_sha256: sums.sha256,
   }));
   current = { profileId, db, hash };
-  return sums;
+  return hash === open.hash ? sums : { ...sums, passwordHash: hash };
 }
 
 // A vault that already exists (on Google Drive, made by the desktop app or
@@ -578,6 +602,334 @@ async function importVault({ profileId, bytes: bytesB64, password, sync }) {
   current = { profileId, db, hash };
   return { passwordHash: hash, ...sums };
 }
+
+// --- master password -----------------------------------------------------------------
+
+// Re-key the open vault. The current password must be typed again; the new key
+// is used from the next save (kdbxweb draws a fresh master seed and KDF salt on
+// every save). The stored copies in backups and on other devices are still
+// under the old key, which is why restoring a backup re-keys it to the current
+// key and why a download from Drive can ask for the new password (adopt).
+async function changePassword({ password, newPassword }) {
+  const open = requireOpen();
+  if (typeof password !== "string" || typeof newPassword !== "string") throw new EngineError("invalid");
+  if (newPassword.length < MIN_PASSWORD_LENGTH) throw new EngineError("password_too_short");
+  const oldHash = open.hash;
+  if ((await passwordHash(password)) !== oldHash) throw new EngineError("bad_password");
+  const newHash = await passwordHash(newPassword);
+  open.db.credentials.passwordHash = kdbxweb.ProtectedValue.fromBinary(fromB64(newHash));
+  open.db.meta.masterKeyChanged = new Date();
+  open.hash = newHash;
+  await save(oldHash); // on failure the stored file and the old key are put back
+  return { passwordHash: newHash };
+}
+
+// --- Recycle Bin ---------------------------------------------------------------------
+
+function existingBin(db) {
+  const bin = db.meta.recycleBinUuid ? db.getGroup(db.meta.recycleBinUuid) : null;
+  return bin || db.getDefaultGroup().groups.find((g) => g.name === RECYCLE_BIN) || null;
+}
+
+function findInBin(db, id) {
+  const bin = existingBin(db);
+  if (!bin || typeof id !== "string") return null;
+  return bin.entries.find((entry) => entry.uuid.id === id) || null;
+}
+
+const isoOf = (date) => (date ? date.toISOString() : null);
+
+function binList() {
+  const bin = existingBin(requireOpen().db);
+  const rows = (bin ? bin.entries : []).map((entry) => ({
+    ...summary(entry),
+    deleted_at: isoOf(entry.times.lastModTime),
+  }));
+  rows.sort((a, b) => String(b.deleted_at).localeCompare(String(a.deleted_at)));
+  return { entries: rows };
+}
+
+async function binRestore({ entryId }) {
+  const { db } = requireOpen();
+  const entry = findInBin(db, entryId);
+  if (!entry) throw new EngineError("not_found");
+  db.move(entry, loginsGroup(db, true));
+  entry.times.lastModTime = new Date(); // the move needs a time newer than the deletion for a merge
+  await save();
+  return {};
+}
+
+// Gone for good: kdbxweb records a deleted object, so a merge with another copy
+// does not bring it back.
+async function binDelete({ entryId }) {
+  const { db } = requireOpen();
+  const entry = findInBin(db, entryId);
+  if (!entry) throw new EngineError("not_found");
+  db.move(entry, undefined);
+  await save();
+  return {};
+}
+
+async function binEmpty() {
+  const { db } = requireOpen();
+  const bin = existingBin(db);
+  const doomed = bin ? [...bin.entries] : [];
+  for (const entry of doomed) db.move(entry, undefined);
+  if (doomed.length) await save();
+  return { removed: doomed.length };
+}
+
+// --- backups -------------------------------------------------------------------------
+
+async function backupList() {
+  const rows = await idb.listBackups(requireOpen().profileId);
+  return { backups: rows.map((row) => ({ id: row.id, savedAt: row.savedAt, size: row.bytes.byteLength })) };
+}
+
+// Put an earlier copy back. The copy may be under an older master password (the
+// password was changed since): `password` opens it, and either way it is re-keyed
+// to the CURRENT key before it is saved, so this browser, its backups and Drive
+// keep one key. The vault being replaced becomes the newest backup, so a restore
+// can be undone.
+async function restoreBackup({ backupId, password }) {
+  const open = requireOpen();
+  const rows = await idb.listBackups(open.profileId);
+  const row = rows.find((candidate) => candidate.id === backupId);
+  if (!row) throw new EngineError("not_found");
+  let db;
+  try {
+    db = await load(row.bytes, open.hash);
+  } catch (error) {
+    if (!(error instanceof EngineError) || error.code !== "bad_password") throw error;
+    if (typeof password !== "string" || !password) throw new EngineError("backup_password");
+    db = await load(row.bytes, await passwordHash(password));
+  }
+  db.credentials.passwordHash = kdbxweb.ProtectedValue.fromBinary(fromB64(open.hash));
+  open.db = db;
+  await save(); // on failure the stored vault is reloaded
+  return {};
+}
+
+// --- an entry's earlier versions ----------------------------------------------------------
+
+function findHistory(db, entryId, index) {
+  const entry = findLogin(db, entryId);
+  if (!entry) throw new EngineError("not_found");
+  const old = Number.isInteger(index) ? entry.history[index] : null;
+  if (!old) throw new EngineError("not_found");
+  return { entry, old };
+}
+
+function historyList({ entryId }) {
+  const entry = findLogin(requireOpen().db, entryId);
+  if (!entry) throw new EngineError("not_found");
+  const versions = entry.history.map((old, index) => ({
+    index,
+    updated_at: isoOf(old.times.lastModTime),
+    title: text(old.fields.get("Title")),
+    username: text(old.fields.get("UserName")),
+  }));
+  return { versions: versions.reverse() }; // newest first
+}
+
+function historyGet({ entryId, index }) {
+  const { old } = findHistory(requireOpen().db, entryId, index);
+  return { entry: fullEntry(old) };
+}
+
+// The old version becomes the current one; what is current now goes to history.
+async function historyRestore({ entryId, index }) {
+  const { db } = requireOpen();
+  const { old } = findHistory(db, entryId, index);
+  const { id: _id, created_at: _c, updated_at: _u, hosts: _h, has_totp: _t, ...fields } = fullEntry(old);
+  return editEntry({ entry: { ...fields, id: entryId } });
+}
+
+// --- one-time codes -------------------------------------------------------------------------
+
+// The code for an entry now. With `url` (the popup asks for the page's own login)
+// the entry must match that page, like a password does.
+async function totp({ entryId, url }) {
+  const { db } = requireOpen();
+  const entry = findLogin(db, entryId);
+  if (!entry) throw new EngineError("not_found");
+  if (url !== undefined && !matchUrls(entryUrls(entry), url, subdomains(entry))) {
+    throw new EngineError("url_mismatch");
+  }
+  const code = await totpCode(text(entry.fields.get(OTP_FIELD)));
+  if (!code) throw new EngineError("no_totp");
+  return code;
+}
+
+// --- import ----------------------------------------------------------------------------------
+
+const sameLogin = (input) =>
+  `${input.title.toLowerCase()}\n${input.username}\n${input.urls[0] ? new URL(input.urls[0]).origin : ""}`;
+
+// Add many logins with ONE save. An entry that is invalid is skipped; one that is
+// already there (same title, username and site) is a duplicate. Counts only: a
+// failure never says which value was wrong.
+async function addMany(inputs) {
+  const { db } = requireOpen();
+  const logins = loginsGroup(db, true);
+  const known = new Set(
+    logins.entries.map((entry) =>
+      sameLogin({
+        title: text(entry.fields.get("Title")),
+        username: text(entry.fields.get("UserName")),
+        urls: entryUrls(entry),
+      }),
+    ),
+  );
+  let added = 0;
+  let duplicates = 0;
+  let skipped = 0;
+  for (const input of inputs) {
+    try {
+      validate(input);
+    } catch {
+      skipped += 1;
+      continue;
+    }
+    const key = sameLogin(input);
+    if (known.has(key)) {
+      duplicates += 1;
+      continue;
+    }
+    known.add(key);
+    apply(db.createEntry(logins), input);
+    added += 1;
+  }
+  if (added) await save();
+  return { added, duplicates, skipped };
+}
+
+async function importCsv({ text: csv }) {
+  requireOpen();
+  const parsed = loginsFromCsv(csv);
+  if (parsed.error) throw new EngineError(`import_${parsed.error}`);
+  const counted = await addMany(
+    parsed.logins.map((login) => ({ ...login, tags: ["imported"], match_subdomains: false })),
+  );
+  return { ...counted, skipped: counted.skipped + parsed.skipped };
+}
+
+// Logins from another KDBX file (any KeePass-compatible export): it must open
+// with the password given. Its Recycle Bin and the desktop app's hidden ".app"
+// group (pairing and sync secrets) are never imported.
+async function importKdbx({ bytes: bytesB64, password }) {
+  requireOpen();
+  if (typeof password !== "string" || !password) throw new EngineError("bad_password");
+  const source = await load(fromB64(bytesB64), await passwordHash(password));
+  const binId = source.meta.recycleBinUuid ? source.meta.recycleBinUuid.id : null;
+  const skipGroup = (group) => group.name === ".app" || group.name === RECYCLE_BIN || group.uuid.id === binId;
+  const inputs = [];
+  const walk = (group) => {
+    if (skipGroup(group)) return;
+    for (const entry of group.entries) {
+      const urls = entryUrls(entry).flatMap((url) => {
+        try {
+          const parsed = new URL(url);
+          return ["http:", "https:"].includes(parsed.protocol) && parsed.hostname ? [`${parsed.origin}/`] : [];
+        } catch {
+          return [];
+        }
+      });
+      inputs.push({
+        title: text(entry.fields.get("Title")) || "Imported login",
+        username: text(entry.fields.get("UserName")),
+        password: text(entry.fields.get("Password")),
+        urls,
+        notes: text(entry.fields.get("Notes")),
+        otp: text(entry.fields.get(OTP_FIELD)),
+        tags: [...(entry.tags || []), "imported"],
+        match_subdomains: false,
+      });
+    }
+    group.groups.forEach(walk);
+  };
+  source.groups.forEach(walk);
+  return addMany(inputs);
+}
+
+// --- password health (offline) -----------------------------------------------------------------
+
+const COMMON = new Set([
+  "password", "passw0rd", "123456", "1234567", "12345678", "123456789", "qwerty", "abc123", "letmein",
+  "welcome", "admin", "iloveyou", "monkey", "dragon", "111111", "changeme", "football", "login",
+]);
+
+// A rough guess at the strength in bits: the size of the character classes used,
+// with repeated characters counting for little. It is an estimate, not a proof.
+function strengthBits(password) {
+  let pool = 0;
+  if (/[a-z]/.test(password)) pool += 26;
+  if (/[A-Z]/.test(password)) pool += 26;
+  if (/[0-9]/.test(password)) pool += 10;
+  if (/[^A-Za-z0-9]/.test(password)) pool += 33;
+  if (!pool) return 0;
+  const distinct = new Set(password).size;
+  return Math.min(password.length, distinct * 2) * Math.log2(pool);
+}
+
+function weakness(password) {
+  if (!password) return "empty";
+  if (COMMON.has(password.toLowerCase())) return "common";
+  if (password.length < 8) return "short";
+  if (strengthBits(password) < 50) return "weak";
+  return null;
+}
+
+// Which logins have a weak password, share one with another, or have not changed
+// in a year. Titles and usernames only — never a password or a hash.
+async function report() {
+  const { db } = requireOpen();
+  const logins = loginsGroup(db);
+  const entries = logins ? logins.entries : [];
+  const brief = (entry) => ({
+    id: entry.uuid.id,
+    title: text(entry.fields.get("Title")),
+    username: text(entry.fields.get("UserName")),
+  });
+  const weak = [];
+  const old = [];
+  const byPassword = new Map();
+  const cutoff = Date.now() - OLD_AFTER_DAYS * 24 * 60 * 60 * 1000;
+  for (const entry of entries) {
+    const password = text(entry.fields.get("Password"));
+    const reason = weakness(password);
+    if (reason) weak.push({ ...brief(entry), reason });
+    if (password) {
+      const key = (await digests(new TextEncoder().encode(password).buffer)).sha256;
+      byPassword.set(key, [...(byPassword.get(key) || []), brief(entry)]);
+    }
+    const changed = entry.times.lastModTime;
+    if (changed && changed.getTime() < cutoff) old.push({ ...brief(entry), updated_at: isoOf(changed) });
+  }
+  const reused = [...byPassword.values()].filter((group) => group.length > 1);
+  return { total: entries.length, weak, reused, old };
+}
+
+// --- merge both copies -----------------------------------------------------------------------
+
+// A conflict: the copy kept from Drive is merged INTO this vault with kdbxweb's
+// own merge (entries from both sides survive, the newer edit wins and the older
+// goes to history, deletions are respected). The merged file is saved here; the
+// service worker then uploads it over Drive's.
+async function mergeRemote({ bytes: bytesB64 }) {
+  const open = requireOpen();
+  const theirs = await load(fromB64(bytesB64), open.hash);
+  try {
+    open.db.merge(theirs);
+  } catch {
+    const stored = await idb.get("vaults", open.profileId);
+    if (stored) current = { ...open, db: await load(stored.bytes, open.hash) };
+    throw new EngineError("merge_failed");
+  }
+  await save();
+  return {};
+}
+
 
 async function decrypts({ bytes }) {
   const { hash } = requireOpen();
@@ -622,6 +974,21 @@ const OPS = {
   decrypts,
   export: exportVault,
   digest: digestOf,
+  change_password: changePassword,
+  bin_list: binList,
+  bin_restore: binRestore,
+  bin_delete: binDelete,
+  bin_empty: binEmpty,
+  backup_list: backupList,
+  restore_backup: restoreBackup,
+  history_list: historyList,
+  history_get: historyGet,
+  history_restore: historyRestore,
+  totp,
+  import_csv: importCsv,
+  import_kdbx: importKdbx,
+  report,
+  merge: mergeRemote,
 };
 
 let queue = Promise.resolve();

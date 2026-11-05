@@ -214,3 +214,47 @@ button:disabled {
 code {
   word-break: break-all;
 }
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+button.tab {
+  background: transparent;
+  color: inherit;
+  border-color: var(--line);
+}
+
+button.tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.entries.static li {
+  cursor: default;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.entries.static .actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.group {
+  margin: 8px 0;
+}
+
+details {
+  margin-top: 8px;
+}
+
+summary {
+  cursor: pointer;
+}

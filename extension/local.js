@@ -19,7 +19,23 @@ import * as idb from "./idb.js";
 const OFFSCREEN_URL = "offscreen.html";
 const MIN_PASSWORD_LENGTH = 12;
 const MAX_NAME_LENGTH = 100;
-const UNLOCK_MS = UNLOCK_HOURS * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+// The owner may choose a SHORTER unlock than the default (settings.unlockHours);
+// never a longer one (ADR-012 fixes 6 hours as the most).
+const UNLOCK_CHOICES = [1, 2, 4, UNLOCK_HOURS];
+// vault operations that change the vault: each one is followed by a sync
+const MUTATIONS = new Set([
+  "add",
+  "edit",
+  "delete",
+  "bin_restore",
+  "bin_delete",
+  "bin_empty",
+  "restore_backup",
+  "history_restore",
+  "import_csv",
+  "import_kdbx",
+]);
 
 // Set by sync.js, so this module does not import it.
 export const hooks = { saved: () => {}, unlocked: () => {}, locked: () => {} };
@@ -160,14 +176,43 @@ export async function deleteProfile(profileId, confirmName) {
 
 // --- unlock and lock --------------------------------------------------------------
 
+async function unlockMs() {
+  const { settings = {} } = await chrome.storage.local.get("settings");
+  const hours = UNLOCK_CHOICES.includes(settings.unlockHours) ? settings.unlockHours : UNLOCK_HOURS;
+  return hours * HOUR_MS;
+}
+
 async function remember(profileId, passwordHash) {
   const now = Date.now();
+  const lasts = await unlockMs();
   await chrome.storage.session.set({
-    unlocked: { profileId, passwordHash, unlockedAt: now, expiresAt: now + UNLOCK_MS },
+    unlocked: { profileId, passwordHash, unlockedAt: now, expiresAt: now + lasts },
   });
   await chrome.storage.local.set({ last_profile_id: profileId });
-  await chrome.alarms.create("unlock-expiry", { when: now + UNLOCK_MS });
+  await chrome.alarms.create("unlock-expiry", { when: now + lasts });
   hooks.unlocked(profileId);
+}
+
+// The vault was re-keyed (its master password changed, here or on another
+// device): the unlock keeps its time but holds the new key.
+export async function updateUnlockHash(profileId, passwordHash) {
+  const { unlocked } = await chrome.storage.session.get("unlocked");
+  if (unlocked && unlocked.profileId === profileId) {
+    await chrome.storage.session.set({ unlocked: { ...unlocked, passwordHash } });
+  }
+}
+
+export async function changePassword(password, newPassword) {
+  const record = await ensureOpen();
+  if (!record) return fail("locked");
+  if (typeof newPassword !== "string" || newPassword.length < MIN_PASSWORD_LENGTH) {
+    return fail("password_too_short");
+  }
+  const reply = await engine("change_password", { password, newPassword });
+  if (!reply.ok) return reply;
+  await updateUnlockHash(record.profileId, reply.result.passwordHash);
+  hooks.saved(record.profileId);
+  return { ok: true, result: {} };
 }
 
 // The current unlock, or null; an expired one is locked on the spot.
@@ -297,7 +342,14 @@ export async function localRequest(type, payload = {}) {
       return reply.ok ? { ok: true, result: { entry_id: payload.entry_id } } : reply;
     }
     case "generate_password":
-      return { ok: true, result: { password: generatePassword({ length: payload.length || 20 }) } };
+      return {
+        ok: true,
+        result: { password: generatePassword(await generatorOptions(payload)) },
+      };
+    case "get_totp": {
+      if (!(await ensureOpen())) return fail(await closedBecause());
+      return engine("totp", { entryId: payload.entry_id, url: payload.url });
+    }
     case "lock":
       await lock();
       return { ok: true, result: {} };
@@ -308,12 +360,34 @@ export async function localRequest(type, payload = {}) {
   }
 }
 
+// The generator's settings: what the owner saved, each value checked, over the
+// defaults; options passed with the request (the vault page's form) win.
+export async function generatorOptions(given = {}) {
+  const { settings = {} } = await chrome.storage.local.get("settings");
+  const saved = settings.generator || {};
+  const pick = (name, fallback) =>
+    typeof given[name] === "boolean" ? given[name] : typeof saved[name] === "boolean" ? saved[name] : fallback;
+  const length = [given.length, saved.length, 20].find((n) => Number.isInteger(n) && n >= 8 && n <= 128);
+  const options = {
+    length,
+    upper: pick("upper", true),
+    lower: pick("lower", true),
+    digits: pick("digits", true),
+    symbols: pick("symbols", true),
+    excludeLookalikes: pick("excludeLookalikes", true),
+  };
+  if (!options.upper && !options.lower && !options.digits && !options.symbols) {
+    return { ...options, upper: true, lower: true, digits: true };
+  }
+  return options;
+}
+
 // --- the vault page's own requests (vault.html) --------------------------------------
 
 export async function vaultOp(op, args) {
   const record = await ensureOpen();
   if (!record) return fail("locked");
   const reply = await engine(op, args);
-  if (reply.ok && ["add", "edit", "delete"].includes(op)) hooks.saved(record.profileId);
+  if (reply.ok && MUTATIONS.has(op)) hooks.saved(record.profileId);
   return reply;
 }
