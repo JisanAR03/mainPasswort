@@ -51,7 +51,7 @@ def test_shipped_manifest_asks_only_for_what_the_page_features_need() -> None:
     assert manifest["content_scripts"] == [
         {
             "matches": web,
-            "js": ["detect.js", "inline.js"],
+            "js": ["deep.js", "detect.js", "inline.js"],  # deep.js: search inside shadow roots
             "run_at": "document_end",
             "all_frames": False,
         }

@@ -38,7 +38,7 @@ stack or value ever echoes an entry field, the master password, a key or a token
 | `permissions` | `activeTab`, `scripting`, `storage`, `offscreen`, `alarms`, `identity` | fill and menu injection; storage; the engine's document; timers that outlive the worker; Google sign-in |
 | `optional_permissions` | `idle` | lock when the screen locks; asked for on a click |
 | `host_permissions` | `http://*/*`, `https://*/*` | the menu and the save prompt work on every site; no `file://` or other schemes |
-| `content_scripts` | `detect.js`, `inline.js`, top frame only, `document_end` | the detector and the menu |
+| `content_scripts` | `deep.js`, `detect.js`, `inline.js`, top frame only, `document_end` | the shadow-DOM search, the detector and the menu |
 | `web_accessible_resources` | `menu.html`, `prompt.html`, for `http(s)` pages | so the content script can frame them |
 | `content_security_policy` | `script-src 'self' 'wasm-unsafe-eval'; object-src 'self'` | WebAssembly for Argon2 and nothing else new |
 | `commands` | `lock-vault` (suggested Alt+Shift+L) | lock from the keyboard |
@@ -61,8 +61,10 @@ There is no `nativeMessaging` permission: nothing talks to another program.
    engine for that one login (the engine re-matches the URL against the entry, I4) and runs
    `fillLogin` in **that exact document** (`documentIds`), so a navigation in between means no
    fill rather than a fill into whatever loaded since.
-5. `fillLogin` fills only visible fields (non-zero size, not hidden, not transparent), fires
-   `input` and `change`, and does not submit. It also fills the username alone on the first
+5. `fillLogin` fills only visible fields (non-zero size, not hidden, not transparent) in the top
+   frame, including fields inside open shadow roots; fires `input` (composed, as a typed one is) and
+   `change`; and does not submit. If it finds no login field it says so (`no_login_field`) and the menu
+   or popup tells the user, rather than reporting a fill. It also fills the username alone on the first
    screen of a two-step login.
 6. The service worker drops its references and closes the menu.
 

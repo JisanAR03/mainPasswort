@@ -49,6 +49,7 @@ async function fill(login, item) {
   item.disabled = false;
   const code = reply.error ? reply.error.code : "internal";
   if (code === "url_changed") say("The page changed. Click the field again.");
+  else if (code === "no_login_field") say("No login fields found on this page.");
   else if (code === "locked") say("The vault locked. Unlock it, then click the field again.");
   else say(`Could not fill (${code}).`);
 }

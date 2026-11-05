@@ -33,6 +33,7 @@
         "https://*/*"
       ],
       "js": [
+        "deep.js",
         "detect.js",
         "inline.js"
       ],

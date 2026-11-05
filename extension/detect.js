@@ -13,9 +13,15 @@
 // screen of a two-step login) is handed over too, so the next screen's
 // password can be paired with it. Only events the user caused count
 // (isTrusted), so page script cannot raise a prompt by faking a submit.
+//
+// Fields and buttons inside OPEN shadow roots (web components, as on Reddit's
+// login) are found through deep.js, which this file needs; a closed shadow root
+// is out of reach by design.
 
 (() => {
   if (window.top !== window) return;
+  const deep = globalThis.__personalVaultDeep;
+  if (!deep) return; // deep.js did not load: do nothing rather than half-work
 
   const SUBMIT_WORDS =
     /\b(log\s*-?\s*in|sign\s*-?\s*in|log\s*-?\s*on|sign\s*-?\s*on|submit|continue|next|anmelden|einloggen|weiter|connexion|entrar|iniciar)\b/i;
@@ -23,11 +29,13 @@
     /\b(show|hide|reveal|toggle|view|forgot|reset|cancel|back|sign\s*-?\s*up|register|create)\b/i;
   const USERNAME_HINT = /user|email|e-mail|login|account|identifier|phone|mobile/i;
   const TEXTISH = 'input[type="text"], input[type="email"], input[type="tel"], input:not([type])';
+  const PASSWORD = 'input[type="password"]';
   const BUTTONISH =
     'button, input[type="submit"], input[type="button"], input[type="image"], [role="button"]';
+  const SCOPE_DEPTH = 12; // composed-tree levels to climb to find the login's container
 
   function passwordIn(scope) {
-    const fields = [...scope.querySelectorAll('input[type="password"]')].filter((f) => f.value);
+    const fields = deep.deepQueryAll(scope, PASSWORD).filter((f) => f.value);
     // a change-password form: the new password is the one to keep
     return fields.find((f) => f.autocomplete === "new-password") || fields[0] || null;
   }
@@ -40,26 +48,31 @@
     return USERNAME_HINT.test(hints.join(" "));
   }
 
+  // The username: the nearest filled text field before the password (page order,
+  // which also orders fields in different shadow roots), preferring one that
+  // looks like a username; with no password, the first that does.
   function usernameIn(scope, passwordField) {
-    let fields = [...scope.querySelectorAll(TEXTISH)].filter((f) => f.value);
     if (passwordField) {
-      fields = fields.filter(
-        (f) => f.compareDocumentPosition(passwordField) & Node.DOCUMENT_POSITION_FOLLOWING,
-      );
-      return fields.find(looksLikeUsername) || fields[fields.length - 1] || null;
+      const ordered = deep.deepQueryAll(scope, `${TEXTISH}, ${PASSWORD}`);
+      const cut = ordered.indexOf(passwordField);
+      const before = ordered
+        .slice(0, cut < 0 ? ordered.length : cut)
+        .filter((f) => f.type !== "password" && f.value);
+      return [...before].reverse().find(looksLikeUsername) || before[before.length - 1] || null;
     }
-    return fields.find(looksLikeUsername) || null;
+    return deep.deepQueryAll(scope, TEXTISH).filter((f) => f.value).find(looksLikeUsername) || null;
   }
 
   // The part of the page that holds the login: the form, or — for pages with
-  // no <form> — the nearest ancestor that also holds a password field.
+  // no <form>, or fields in a shadow root, where `.form` is null — the nearest
+  // ancestor in the composed tree that also holds a password field.
   function scopeOf(element) {
     if (element.form) return element.form;
     let node = element;
-    for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
-      if (node.querySelector('input[type="password"]')) return node;
+    for (let depth = 0; node && depth < SCOPE_DEPTH; depth += 1, node = deep.composedParent(node)) {
+      if (deep.deepQueryAll(node, PASSWORD).length > 0) return node;
     }
-    return element.closest("form") || document.body;
+    return deep.composedClosest(element, "form") || document.body;
   }
 
   function send(message) {
@@ -94,7 +107,7 @@
     "keydown",
     (event) => {
       if (!event.isTrusted || event.key !== "Enter") return;
-      const field = event.target;
+      const field = deep.eventTarget(event);
       if (field instanceof HTMLInputElement && (field.type === "password" || looksLikeUsername(field))) {
         capture(scopeOf(field));
       }
@@ -105,8 +118,10 @@
   document.addEventListener(
     "click",
     (event) => {
-      if (!event.isTrusted || !(event.target instanceof Element)) return;
-      const button = event.target.closest(BUTTONISH);
+      if (!event.isTrusted) return;
+      const target = deep.eventTarget(event);
+      if (!(target instanceof Element)) return;
+      const button = deep.composedClosest(target, BUTTONISH);
       if (!button) return;
       const label = [
         button.innerText,

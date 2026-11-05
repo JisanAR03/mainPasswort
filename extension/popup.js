@@ -49,7 +49,9 @@ async function startFill(match, button) {
   button.disabled = true;
   const reply = await send("fill", { entryId: match.id, url: pageUrl });
   button.disabled = false;
-  if (reply.ok) {
+  if (reply.ok && reply.result && reply.result.filled === false) {
+    setStatus("No login fields found on this page.");
+  } else if (reply.ok) {
     setStatus("Filled.");
   } else if (reply.error && reply.error.code === "url_changed") {
     setStatus("The page changed since this list loaded. Reopen the popup.");
