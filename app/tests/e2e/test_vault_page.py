@@ -171,12 +171,17 @@ def test_a_login_with_a_secret_shows_a_live_code_that_matches_the_engine(
     page = _vault_page(browser)
     _open_entry(page, "Two factor")
     page.wait_for_selector("#f-totp", state="visible", timeout=15_000)
-    shown = page.inner_text("#f-totp-code").replace(" ", "")
-    assert re.fullmatch(r"\d{6}", shown)
+    assert re.fullmatch(r"\d{6}", page.inner_text("#f-totp-code").replace(" ", ""))
     assert re.fullmatch(r"\d+ s", page.inner_text("#f-totp-left"))
-    # the same code the engine computes (it can roll over between the two reads)
-    now = ext.ok("ext_totp", {"entryId": entry})["code"]
-    assert shown == now or shown == page.inner_text("#f-totp-code").replace(" ", "")
+    # the page shows the very code the engine computes (a 30-second window can roll over
+    # between the two reads, so a mismatch is retried once the page has refreshed)
+    for _ in range(4):
+        shown = page.inner_text("#f-totp-code").replace(" ", "")
+        if shown == ext.ok("ext_totp", {"entryId": entry})["code"]:
+            break
+        page.wait_for_timeout(1_500)
+    else:
+        raise AssertionError("the page and the engine never agreed on the code")
 
 
 def test_a_new_login_can_get_its_secret_and_a_bad_one_is_explained(
@@ -342,3 +347,88 @@ def test_a_conflict_offers_merge_and_a_password_changed_elsewhere_offers_the_new
     page.click("#sync-rekey button[type=submit]")
     page.wait_for_selector("#sync-rekey", state="hidden", timeout=30_000)
     assert ext.sync_status(profile)["state"] == "synced"
+
+
+def test_the_health_report_stays_while_the_page_refreshes_itself(
+    browser: BrowserContext, ext: Ext
+) -> None:
+    """The page redraws on every sync status change; an open report must not vanish."""
+    ext.create_profile("Personal")
+    ext.add_login(title="Common", password="password")
+    page = _vault_page(browser)
+    page.click('.tab[data-tab="health"]')
+    page.click("#health-run")
+    page.wait_for_selector("#health-out h2")
+    ext.control.evaluate(
+        "() => chrome.storage.local.set({ 'sync_status:p_other': { state: 'off', message: 'x' } })"
+    )
+    ext.control.wait_for_timeout(1_500)  # long enough for the page's own refresh
+    assert page.locator("#health-out h2").count() == 3, "the report was wiped by a refresh"
+    page.click('.tab[data-tab="logins"]')
+    page.click('.tab[data-tab="health"]')
+    assert page.locator("#health-out h2").count() == 0, "an old report is not shown again"
+
+
+def test_parts_of_the_page_that_should_be_hidden_are_hidden(
+    browser: BrowserContext, ext: Ext
+) -> None:
+    """A rule that sets display (a row of buttons) must not defeat the hidden attribute:
+    with nothing to decide, no choice buttons, no one-time-code row, no history."""
+    ext.create_profile("Personal")
+    ext.add_login(title="Plain login")
+    page = _vault_page(browser)
+    for selector in ("#sync-choice", "#sync-missing", "#choice-merge", "#sync-rekey"):
+        assert not page.is_visible(selector), f"{selector} shows with nothing to decide"
+    for button in (
+        "Keep this computer's copy",
+        "Take the Google Drive copy",
+        "Upload this vault again",
+    ):
+        assert not page.get_by_role("button", name=button).is_visible(), button
+    _open_entry(page, "Plain login")
+    assert not page.is_visible("#f-totp"), "an empty one-time-code row is shown"
+    assert not page.is_visible("#f-history")
+
+
+def test_closing_a_login_form_leaves_the_settings_and_generator_options_alone(
+    browser: BrowserContext, ext: Ext
+) -> None:
+    """Closing the entry form used to reset every form on the page, so the settings
+    showed blank defaults and the next "Save settings" would have saved them."""
+    ext.create_profile("Personal")
+    ext.add_login(title="Some login")
+    ext.ok(
+        "ext_settings",
+        {
+            "unlockHours": 2,
+            "generator": {
+                "length": 31,
+                "upper": True,
+                "lower": True,
+                "digits": False,
+                "symbols": False,
+                "excludeLookalikes": True,
+            },
+        },
+    )
+    ext.ok("ext_set_offer", {"value": False})
+    page = _vault_page(browser)
+    assert page.input_value("#s-client") == "fake-client-id"
+
+    _open_entry(page, "Some login")
+    page.click("#f-cancel")
+    assert page.input_value("#s-client") == "fake-client-id"
+    assert page.input_value("#s-unlock-hours") == "2"
+    assert page.is_checked("#s-offer") is False
+    assert page.input_value("#rename-name") == "Personal"
+
+    page.click("#add")  # a new login: the generator options are the saved ones, not blank
+    assert page.input_value("#g-length") == "31"
+    assert page.is_checked("#g-upper") and page.is_checked("#g-lower")
+    assert not page.is_checked("#g-digits") and not page.is_checked("#g-symbols")
+    page.click("#f-cancel")
+    page.click("#settings-form button[type=submit]")  # saving now keeps what was saved
+    _notice(page, "Settings saved")
+    assert ext.state()["settings"]["googleClientId"] == "fake-client-id"
+    assert ext.state()["settings"]["unlockHours"] == 2
+    assert ext.state()["offerToSave"] is False

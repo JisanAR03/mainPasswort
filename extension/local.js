@@ -362,6 +362,11 @@ export async function localRequest(type, payload = {}) {
 
 // The generator's settings: what the owner saved, each value checked, over the
 // defaults; options passed with the request (the vault page's form) win.
+// A fresh password for a new-password field, from the saved generator options.
+export async function suggestedPassword() {
+  return generatePassword(await generatorOptions());
+}
+
 export async function generatorOptions(given = {}) {
   const { settings = {} } = await chrome.storage.local.get("settings");
   const saved = settings.generator || {};

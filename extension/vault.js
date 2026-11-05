@@ -145,13 +145,7 @@ function renderSettings() {
   $("s-unlock-hours").value = String(settings.unlockHours);
   $("s-offer").checked = state.offerToSave;
   $("s-redirect").textContent = state.redirectUrl;
-  const generator = settings.generator;
-  $("g-length").value = generator.length;
-  $("g-upper").checked = generator.upper;
-  $("g-lower").checked = generator.lower;
-  $("g-digits").checked = generator.digits;
-  $("g-symbols").checked = generator.symbols;
-  $("g-lookalikes").checked = generator.excludeLookalikes;
+  fillGeneratorOptions();
   renderNever();
 }
 
@@ -232,12 +226,12 @@ function selectTab(name) {
   $("pane-logins").hidden = name !== "logins";
   $("pane-bin").hidden = name !== "bin";
   $("pane-health").hidden = name !== "health";
+  if (name === "health") $("health-out").replaceChildren(); // an old report is not shown again
   return renderPane();
 }
 
 async function renderPane() {
   if (tab === "bin") await renderBin();
-  if (tab === "health") $("health-out").replaceChildren();
 }
 
 async function renderBin() {
@@ -358,7 +352,12 @@ function stopTotp() {
 }
 
 function clearForms() {
-  for (const form of document.querySelectorAll("form")) form.reset();
+  // The forms that hold something typed or a login. Not the settings and rename
+  // forms: they show saved values, and resetting them would put the browser's blank
+  // defaults in front of the next "Save settings".
+  for (const form of document.querySelectorAll("form:not(#settings-form):not(#rename-form)")) {
+    form.reset();
+  }
   $("entry-form").hidden = true;
   $("f-password").type = "password";
   $("f-history").hidden = true;
@@ -370,7 +369,20 @@ function clearForms() {
   editing = null;
 }
 
+// the generator options sit in the entry form, which a reset blanks: show the saved ones
+function fillGeneratorOptions() {
+  if (!state) return;
+  const generator = state.settings.generator;
+  $("g-length").value = generator.length;
+  $("g-upper").checked = generator.upper;
+  $("g-lower").checked = generator.lower;
+  $("g-digits").checked = generator.digits;
+  $("g-symbols").checked = generator.symbols;
+  $("g-lookalikes").checked = generator.excludeLookalikes;
+}
+
 function fillForm(entry) {
+  fillGeneratorOptions();
   $("f-title").value = entry.title || "";
   $("f-username").value = entry.username || "";
   $("f-password").value = entry.password || "";

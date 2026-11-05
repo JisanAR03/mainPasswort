@@ -298,7 +298,7 @@ function hostsOf(urls) {
   return hosts;
 }
 
-const hasOtp = (entry) => text(entry.fields.get(OTP_FIELD)).trim() !== "";
+const hasOtp = (entry) => parseOtp(text(entry.fields.get(OTP_FIELD))) !== null;
 
 function summary(entry) {
   const urls = entryUrls(entry);
@@ -508,11 +508,21 @@ async function addEntry({ entry: input }) {
   return { id: entry.uuid.id };
 }
 
-async function editEntry({ entry: input }) {
-  validate(input);
+async function editEntry({ entry: given }) {
   const { db } = requireOpen();
-  const entry = findLogin(db, input.id);
-  if (!entry) throw new EngineError("not_found");
+  const entry = given && findLogin(db, given.id);
+  if (!entry) {
+    validate(given);
+    throw new EngineError("not_found");
+  }
+  // A one-time-code value that is already stored (and may be one this extension
+  // cannot compute: Steam, HOTP, something edited in KeePassXC) comes back from
+  // every form unchanged; it is kept as it is and not validated again, so it can
+  // never block an edit of the password or the title.
+  const stored = text(entry.fields.get(OTP_FIELD)).trim();
+  const input =
+    typeof given.otp === "string" && given.otp.trim() === stored ? { ...given, otp: undefined } : given;
+  validate(input);
   entry.pushHistory();
   apply(entry, input);
   entry.times.update();
@@ -742,6 +752,8 @@ async function historyRestore({ entryId, index }) {
   const { db } = requireOpen();
   const { old } = findHistory(db, entryId, index);
   const { id: _id, created_at: _c, updated_at: _u, hosts: _h, has_totp: _t, ...fields } = fullEntry(old);
+  // an earlier version's one-time code that cannot be computed is not brought back
+  if (!parseOtp(fields.otp)) fields.otp = undefined;
   return editEntry({ entry: { ...fields, id: entryId } });
 }
 
@@ -784,7 +796,10 @@ async function addMany(inputs) {
   let added = 0;
   let duplicates = 0;
   let skipped = 0;
-  for (const input of inputs) {
+  for (const given of inputs) {
+    // a one-time code this extension cannot compute (Steam, HOTP…) is left out;
+    // the login itself is still imported
+    const input = given.otp && !parseOtp(given.otp) ? { ...given, otp: "" } : given;
     try {
       validate(input);
     } catch {

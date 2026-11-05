@@ -83,9 +83,36 @@
 
   // Put the frame in a layer, first moving the layer to `container` if it is
   // elsewhere (moving a host reloads the frames in it, so it is done before any).
+  //
+  // Inside a dialog the host is also made a popover and shown: that lifts it into
+  // the browser's top layer, where it is neither clipped by the dialog's own
+  // overflow nor offset by a transform on the dialog (a position: fixed child of a
+  // transformed dialog is otherwise anchored to, and cut off by, the dialog box).
   function attach(layer, frame, container = document.documentElement) {
-    if (layer.host.parentNode !== container) container.append(layer.host);
+    const { host } = layer;
+    if (host.parentNode !== container) {
+      if (host.popover) hideLayer(layer);
+      container.append(host);
+    }
+    if (container !== document.documentElement && typeof host.showPopover === "function") {
+      try {
+        host.popover = "manual";
+        if (!host.matches(":popover-open")) host.showPopover();
+      } catch {
+        // an older browser: the host stays an ordinary child of the dialog
+      }
+    }
     layer.shadow.append(frame);
+  }
+
+  function hideLayer(layer) {
+    const { host } = layer;
+    try {
+      if (host.matches(":popover-open")) host.hidePopover();
+    } catch {
+      // not a popover (any more)
+    }
+    host.removeAttribute("popover");
   }
 
   function visible(element) {
@@ -170,6 +197,8 @@
       type: "menu_open",
       field: password ? "password" : "username",
       password_nearby: password || passwordNear(field),
+      // a sign-up or change-password field: the menu may offer a new password
+      new_password: password && /(^|\s)new-password(\s|$)/i.test(field.autocomplete || ""),
     });
     if (opening === field) opening = null;
     // a later focus, or the field losing focus meanwhile, wins
@@ -194,6 +223,7 @@
     menu = null;
     globalThis.__personalVaultField = null;
     frame.remove();
+    hideLayer(menuLayer);
     request({ type: "menu_close", token });
   }
 

@@ -79,6 +79,30 @@ Follow [setup-browser.md](setup-browser.md) section 4 with a **throwaway Google 
       only if this OAuth client can see the file.) Record the answer. If it opens, edits made in the
       browser show up when the other side syncs.
 
+## 4b. What only a real browser and a real person can show (FEAT-02)
+
+Run these in your own Brave (or Chrome) with a **throwaway profile in the extension** (create a
+profile named `Test`); none of them needs Google.
+
+- [ ] 4b.1 **Popup in the window you are looking at.** Open two browser windows on two different
+      sites that each have a login in `Test`. In each window click the toolbar icon: the popup lists
+      that window's site, never the other window's. (The automated test uses popup.html as a tab.)
+- [ ] 4b.2 **Keyboard shortcuts.** Alt+Shift+P opens the popup, Alt+Shift+L locks the vault. If a
+      key does nothing another extension owns it: `brave://extensions/shortcuts`.
+- [ ] 4b.3 **Lock when idle.** Settings → Lock after the computer has been idle for **5 minutes** →
+      Save settings (allow the permission). Leave the computer alone for 5 minutes with the browser
+      open: the vault is locked when you come back. (The automated tests cannot wait for the OS idle
+      state.)
+- [ ] 4b.4 **Clipboard.** Copy a password from the vault page, close the vault tab at once, wait 30
+      seconds and paste somewhere: nothing (or a space). Copy again, then copy some other text
+      yourself within 30 seconds: your other text is still on the clipboard afterwards.
+- [ ] 4b.5 **A real dialog.** On a site that opens its login in a modal dialog (many do), click the
+      username box: the menu appears under it and a click on a login fills it.
+- [ ] 4b.6 **Import.** Export your passwords from Chrome (a CSV), import it on the vault page,
+      check a few logins, then delete the CSV file. Importing it again adds nothing new.
+- [ ] 4b.7 **Change the master password.** Change it, lock, unlock with the new one. With Google
+      Drive on: sync, then on a second browser profile check that it asks for the new password.
+
 ## 5. The browser's own manager
 
 - [ ] 5.1 With the browser's password saving and autofill off ([setup-browser.md](setup-browser.md)
@@ -109,6 +133,7 @@ The vault and the key:
 - [ ] `extension/engine.js` — the only KDBX reader and writer; `normalize()`
 - [ ] `extension/local.js` — profiles, unlock, lock, the session record
 - [ ] `extension/idb.js` — storage
+- [ ] `extension/totp.js`, `extension/csv.js` — one-time codes (RFC 6238) and the CSV reader (hostile input)
 - [ ] `extension/config.js` — the shipped values (weak settings exist only in tests)
 - [ ] `extension/vendor/VENDOR.md` and `scripts/check_vendor.py` — what is pinned and how
 

@@ -60,6 +60,11 @@
     "default_title": "Personal Vault"
   },
   "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      }
+    },
     "lock-vault": {
       "suggested_key": {
         "default": "Alt+Shift+L"

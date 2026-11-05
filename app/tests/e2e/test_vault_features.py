@@ -796,3 +796,86 @@ def test_a_web_page_cannot_reach_the_management_requests(
         )
         assert reply is None or reply.get("ok") is False, type_
     assert _titles(ext) == ["Safe"]
+
+
+# --- one-time codes this extension cannot compute ----------------------------------------------
+
+STEAM = "otpauth://totp/Steam?secret=JBSWY3DPEHPK3PXP&encoder=steam"
+HOTP = "otpauth://hotp/Counter?secret=JBSWY3DPEHPK3PXP&counter=1"
+
+
+def test_an_import_drops_a_code_it_cannot_compute_but_keeps_the_login(
+    ext: Ext, tmp_path: Path
+) -> None:
+    ext.create_profile("Personal")
+    rows = [
+        "name,username,password,totp",
+        f"Steamy,u,pw1,{STEAM}",
+        f"Counter,u,pw2,{HOTP}",
+        "Plain,u,pw3,",
+    ]
+    csv = "\n".join(rows) + "\n"
+    assert ext.ok("ext_import_csv", {"text": csv}) == {"added": 3, "duplicates": 0, "skipped": 0}
+    for title in ("Steamy", "Counter"):
+        entry = ext.ok("ext_get", {"entryId": _entry_id(ext, title)})["entry"]
+        assert entry["otp"] == "" and entry["password"] in {"pw1", "pw2"}
+
+    source = build_weak_vault(tmp_path / "source.kdbx", password="source password")
+    kp = PyKeePass(str(source), password="source password")
+    login = kp.add_entry(
+        kp.find_groups(name="Logins", first=True),
+        "From KeePassXC",
+        "k",
+        "kpw",
+        url="https://k.example/",
+    )
+    login.otp = STEAM
+    kp.save()
+    result = ext.ok(
+        "ext_import_kdbx",
+        {"bytes": base64.b64encode(source.read_bytes()).decode(), "password": "source password"},
+    )
+    assert result["added"] == 1 and result["skipped"] == 0, "the login was not lost with its code"
+
+
+def test_a_stored_code_that_cannot_be_computed_never_blocks_an_edit(
+    ext: Ext, tmp_path: Path
+) -> None:
+    """A vault edited in KeePassXC can hold a Steam or HOTP value. It must survive every
+    edit untouched (the forms send it back unchanged) and must not stop one."""
+    source = build_weak_vault(tmp_path / "steam.kdbx", password="source password")
+    kp = PyKeePass(str(source), password="source password")
+    login = kp.add_entry(
+        kp.find_groups(name="Logins", first=True),
+        "Steam login",
+        "s",
+        "old password",
+        url="https://s.example/",
+    )
+    login.otp = STEAM
+    kp.save()
+    ext.google.put_vault("p_steam1", source.read_bytes())
+    listed = ext.ok("ext_drive_list")
+    ext.ok(
+        "ext_drive_open",
+        {"fileId": listed["vaults"][0]["fileId"], "name": "Steam", "password": "source password"},
+    )
+
+    entry_id = _entry_id(ext, "Steam login")
+    summary = next(e for e in ext.ok("ext_list", {"query": ""})["entries"] if e["id"] == entry_id)
+    assert summary["has_totp"] is False, "no code button for a code it cannot make"
+    assert ext.call("ext_totp", {"entryId": entry_id})["error"]["code"] == "no_totp"
+
+    form = ext.ok("ext_get", {"entryId": entry_id})["entry"]
+    assert form["otp"] == STEAM  # the form is shown the stored value
+    ext.ok("ext_save_entry", {"entry": {**form, "password": "new password"}})  # and sends it back
+    after = ext.ok("ext_get", {"entryId": entry_id})["entry"]
+    assert after["password"] == "new password" and after["otp"] == STEAM
+
+    # the in-page "update the saved password" path goes through the same edit
+    versions = ext.ok("ext_history_list", {"entryId": entry_id})["versions"]
+    ext.ok("ext_history_restore", {"entryId": entry_id, "index": versions[0]["index"]})
+    assert ext.ok("ext_get", {"entryId": entry_id})["entry"]["password"] == "old password"
+    # typing a NEW value that is not a usable code is still refused
+    bad = ext.call("ext_save_entry", {"entry": {**after, "otp": "not a secret !"}})
+    assert bad["error"]["code"] == "invalid"

@@ -215,6 +215,11 @@ code {
   word-break: break-all;
 }
 
+/* a class that sets display (.row) must not defeat the hidden attribute */
+[hidden] {
+  display: none !important;
+}
+
 .tabs {
   display: flex;
   gap: 6px;

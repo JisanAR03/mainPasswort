@@ -21,7 +21,7 @@
 // (local.js, engine.js); there is no other program to ask.
 import { store } from "./api.js";
 import { UNLOCK_HOURS } from "./config.js";
-import { fillLogin } from "./fill.js";
+import { fillLogin, fillNewPassword } from "./fill.js";
 import * as local from "./local.js";
 import * as sync from "./sync.js";
 
@@ -32,8 +32,10 @@ const PROMPT_CLOSE_DELAY_MS = 1500;
 const MAX_USERNAME = 500;
 const MAX_PASSWORD = 4096;
 const MAX_NEVER_SITES = 500;
+// measured in the menu frame (frames.css): a row is two lines of text, its padding and
+// a border; a smaller number cut the last row of a menu with several
 const MENU_HEADER_PX = 30;
-const MENU_ROW_PX = 46;
+const MENU_ROW_PX = 52;
 const MENU_WARNING_PX = 34;
 const MENU_VISIBLE_ROWS = 5;
 const LEGACY_DETECT_ID = "detect-submits";
@@ -163,16 +165,19 @@ async function openMenu(message, sender) {
   // "locked" and "no vault yet" are worth saying on a password field (or next
   // to one), never on every username-looking field of the web
   const loginContext = message.field === "password" || message.password_nearby === true;
-  const show = state === "matches" || (loginContext && (state === "locked" || state === "no_vault"));
+  // a sign-up field of an unlocked vault also offers a new password
+  const suggest = message.new_password === true && message.field === "password" && (state === "matches" || state === "none");
+  const show = state === "matches" || suggest || (loginContext && (state === "locked" || state === "no_vault"));
   if (!show) return { show: false };
   const insecure = plainHttp(url);
   const token = newToken();
   await store.sessionSet({
-    [menuKey(sender.tab.id)]: { token, url, documentId: sender.documentId, state, logins, insecure },
+    [menuKey(sender.tab.id)]: { token, url, documentId: sender.documentId, state, logins, insecure, suggest },
   });
   let height = MENU_HEADER_PX + (insecure ? MENU_WARNING_PX : 0);
-  if (state === "matches") height += Math.min(logins.length, MENU_VISIBLE_ROWS) * MENU_ROW_PX;
-  else height += MENU_ROW_PX + 48; // the one row that opens the unlock or set-up page
+  const rows = (state === "matches" ? Math.min(logins.length, MENU_VISIBLE_ROWS) : 0) + (suggest ? 1 : 0);
+  // no rows: the one row that opens the unlock or set-up page
+  height += rows ? rows * MENU_ROW_PX : MENU_ROW_PX + 48;
   return { show: true, token, height };
 }
 
@@ -184,8 +189,33 @@ async function handleMenu(message, sender) {
     case "menu_data":
       return {
         ok: true,
-        result: { state: session.state, logins: session.logins, insecure: session.insecure },
+        result: {
+          state: session.state,
+          logins: session.logins,
+          insecure: session.insecure,
+          suggest: session.suggest === true,
+        },
       };
+    case "menu_suggest": {
+      // your click in the menu frame, for a new-password field only: a fresh
+      // password from the generator, into that field and its confirmation box
+      if (session.suggest !== true) return fail("bad_request");
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.url !== session.url) return fail("url_changed");
+      let outcome;
+      try {
+        [outcome] = await chrome.scripting.executeScript({
+          target: { tabId, documentIds: [session.documentId] },
+          func: fillNewPassword,
+          args: [await local.suggestedPassword()],
+        });
+      } catch {
+        return fail("url_changed");
+      }
+      if (outcome.result && outcome.result.filled === false) return fail("no_login_field");
+      await closeMenu(tabId);
+      return { ok: true, result: {} };
+    }
     case "menu_fill": {
       const login = session.logins.find((candidate) => candidate.id === message.entryId);
       if (!login) return fail("bad_request");
@@ -494,7 +524,7 @@ const PAGE_TYPES = new Set([
   "login_submitted",
   "username_submitted",
 ]);
-const MENU_TYPES = new Set(["menu_data", "menu_fill", "menu_unlock", "menu_dismiss"]);
+const MENU_TYPES = new Set(["menu_data", "menu_fill", "menu_suggest", "menu_unlock", "menu_dismiss"]);
 const EXT_TYPES = new Set([
   "ext_state",
   "ext_create_profile",

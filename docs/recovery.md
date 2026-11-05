@@ -12,8 +12,10 @@ way in: **a forgotten master password cannot be recovered, by design.**
 | The extension or the browser profile is gone, but sync to Google Drive was on | Load the extension again, set the Google OAuth client ID (Settings), then on the vault page open **Open a vault that is already on Google Drive** and type that vault's master password (setup guide, section 4). |
 | You want to read the passwords without the extension | Download `vault.kdbx` from Drive (`PersonalVault` folder), or use **Export encrypted copy**, and open it in KeePassXC with the master password. |
 | The file on Google Drive is damaged or was rolled back | In Drive, right-click the file → **Manage versions** and download an earlier version; open it in KeePassXC. Drive keeps versions of every upload. |
-| The vault in the browser is damaged | The extension never replaces a vault with bytes it could not read back, and keeps the 20 previous copies in its storage. There is **no restore button yet** (see known limitations): get the file from Drive, as above. |
-| Both copies changed on two devices | The Google Drive panel offers **Keep this computer's copy** or **Take the Google Drive copy**; the other copy stays in Drive's version history. |
+| The vault in the browser is damaged | The extension never replaces a vault with bytes it could not read back, and keeps the 20 previous copies in its storage. On the vault page, **Backups → Show backups** lists them: pick one and **Restore** (a backup from before a master-password change asks for the old password; the vault you replace becomes the newest backup, so a restore can be undone). Or get the file from Drive, as above. |
+| Both copies changed on two devices | The Google Drive panel offers **Merge both copies**, **Keep this computer's copy** or **Take the Google Drive copy**; the other copy stays in Drive's version history. |
+| You deleted a login by mistake | Vault page → **Recycle Bin** → **Restore**. (Anything you deleted for good is gone; an earlier backup may still hold it.) |
+| You overwrote a password by mistake | Open the login → **Earlier versions** → **Restore this version**. |
 
 ## The three paths to practise before you need them
 

@@ -64,6 +64,14 @@ def test_the_menu_works_inside_a_native_modal_dialog(
     )
     assert top == "PERSONAL-VAULT", f"the menu is covered by {top}"
 
+    # the WHOLE menu is on show, not cut off by the dialog's own edge: its last pixels
+    # are the menu too (a small dialog used to clip it to its header)
+    bottom = page.evaluate(
+        "([x, y]) => { const e = document.elementFromPoint(x, y); return e ? e.tagName : null; }",
+        [cx, box["y"] + box["height"] - 6],
+    )
+    assert bottom == "PERSONAL-VAULT", f"the menu is cut off by {bottom}"
+
     page.mouse.click(cx, cy)  # a real click on the first menu row
     page.wait_for_function("() => document.getElementById('password').value !== ''", timeout=15_000)
     assert page.input_value("#password") == PASSWORD_LOCAL

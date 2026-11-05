@@ -29,7 +29,11 @@ You need Chrome or Brave, version 116 or newer.
    to pages loaded afterwards.
 
 When you update the code (a `git pull`), click the reload arrow on the extension's card. A reload
-**locks** the vault (the unlock is kept in memory only) but loses nothing.
+**locks** the vault (the unlock is kept in memory only) but loses nothing: your logins, history,
+backups, the Never list, settings and Google link all stay (an automated upgrade run in Brave, from
+the previous version to this one, checked each of them). **Always click reload; do not rely on a
+browser restart.** In that same run a plain restart kept running the *previous* background script
+(the browser caches it), so the new features did not appear until the extension was reloaded.
 
 ## 2. Create a vault
 
@@ -57,8 +61,16 @@ password and Google account; one is unlocked at a time, and unlocking another lo
 - **Plain `http://` sites.** The menu shows a "Not secure" warning and only an `http://` login is
   offered; a login is never offered for saving on plain `http://` (except on this machine).
 - **Vault page** (popup → **Open vault**): the full list with search, add, edit, delete (to the
-  Recycle Bin), a password generator, copy (the clipboard is cleared after 30 seconds), profiles,
-  settings, export, and the Google Drive panel.
+  Recycle Bin), a password generator with options, copy (taken off the clipboard after 30 seconds
+  if it is still there), profiles, settings, export, and the Google Drive panel. Tabs next to the
+  logins: **Recycle Bin** (restore, delete for good, empty) and **Password health** (weak, reused
+  and old passwords). Side panels: **Backups** (restore one of the last 20 saved copies),
+  **Import** (CSV or `.kdbx`), and under **Profile** **Change the master password**. Open a login
+  to see its **earlier versions** and its **one-time code** (add the secret in the login's form;
+  the popup has a **Copy code** button for the page's own login).
+- **A new password.** On a sign-up or change-password field the menu starts with **Suggest a strong
+  password**: your click fills that field and the confirmation box, and the login is offered for
+  saving when you send the form.
 
 ## 4. Google Drive sync
 
@@ -98,7 +110,12 @@ with backoff. A copy on Drive that this browser has not seen is never overwritte
 
 **Both copies changed.** The panel offers **Keep this computer's copy** (upload it; theirs stays in
 Drive's version history) or **Take the Google Drive copy** (adopt theirs; yours becomes the newest
-backup). Merging both is not available.
+backup). **Merge both copies** keeps every login from both sides (the newer edit of a login wins,
+the older goes to its history, and a login deleted for good stays deleted) and uploads the result.
+
+**You changed the master password on another device.** This browser then finds a copy it cannot
+open and says so; the panel shows a box for the **new** master password. Type it to take that copy;
+a wrong one changes nothing.
 
 **A vault that is already on Drive** (made by another browser, or by the old desktop app): on the
 vault page, while nothing is unlocked, expand **Open a vault that is already on Google Drive**, sign
