@@ -1,5 +1,5 @@
-// The service worker ([S]): owns the native port, reads tab URLs itself (a
-// page never supplies one), and runs every fill and every save. It holds a
+// The service worker ([S]): reads tab URLs itself (a page never supplies one),
+// and runs every fill and every save. It holds a
 // password only while it uses it: for the executeScript call that fills it,
 // and — for a login you just submitted — in session storage (memory only,
 // unreadable by content scripts) until you answer the prompt or two minutes
@@ -7,20 +7,19 @@
 //
 // Each message is accepted by where it comes from, as the browser reports it
 // (the MessageSender), never by what the message claims:
-// - the toolbar popup (popup.html): status, pairing, list, fill, add, lock;
+// - the toolbar popup (popup.html): status, list, fill, add, lock;
 // - content scripts in the top frame of an http(s) tab: menu_open/close,
 //   prompt_open, login_submitted, username_submitted — none of them is ever
 //   answered with a title, a username or a password;
 // - the menu and prompt frames (menu.html, prompt.html) inside a tab: their
 //   own requests, each tied to a one-time token handed out for that tab;
-// - the vault page (vault.html) and the popup, for extension-only mode's
-//   profiles, entries, settings and sync (ext_* messages);
+// - the vault page (vault.html) and the popup, for profiles, entries, settings
+//   and sync (ext_* messages);
 // - the offscreen vault engine (offscreen.html), only to say the network is back.
 //
-// Two modes (ADR-012): "desktop" sends every vault request to the desktop app
-// over native messaging, as before; "extension" answers it from the vault the
-// extension holds itself (local.js, engine.js). vaultRequest() is the switch.
-import { browserName, nativeRequest, newPairingKey, store } from "./api.js";
+// Every vault request is answered from the vault the extension holds itself
+// (local.js, engine.js); there is no other program to ask.
+import { store } from "./api.js";
 import { fillLogin } from "./fill.js";
 import * as local from "./local.js";
 import * as sync from "./sync.js";
@@ -40,11 +39,6 @@ const LEGACY_DETECT_ID = "detect-submits";
 
 const fail = (code) => ({ ok: false, error: { code } });
 
-async function vaultRequest(type, payload) {
-  return (await local.mode()) === "extension"
-    ? local.localRequest(type, payload)
-    : nativeRequest(type, payload);
-}
 const pageUrl = (name) => chrome.runtime.getURL(name);
 
 // Before the content scripts were declared in the manifest, the detector was
@@ -108,13 +102,11 @@ async function targetTab() {
 
 // The vault's answer for one page URL: its matches, or why there are none.
 async function loginsFor(url) {
-  const reply = await vaultRequest("get_logins", { url });
+  const reply = await local.localRequest("get_logins", { url });
   if (reply.ok) return { state: "matches", logins: reply.result.logins };
   const code = reply.error ? reply.error.code : "internal";
   if (code === "no_match") return { state: "none", logins: [] };
-  if (code === "locked" || code === "not_paired" || code === "app_not_running") {
-    return { state: code, logins: [] };
-  }
+  if (code === "locked" || code === "no_vault") return { state: code, logins: [] };
   return { state: "error", logins: [] };
 }
 
@@ -122,7 +114,7 @@ async function loginsFor(url) {
 // only in that exact document, so a navigation since the menu opened means no
 // fill rather than a fill into whatever page loaded since.
 async function fillInto(tabId, documentId, entryId, url) {
-  const reply = await vaultRequest("get_secret", { entry_id: entryId, url });
+  const reply = await local.localRequest("get_secret", { entry_id: entryId, url });
   if (!reply.ok) return reply;
   const { username, password } = reply.result;
   const target = documentId ? { tabId, documentIds: [documentId] } : { tabId, frameIds: [0] };
@@ -157,12 +149,10 @@ async function closeMenu(tabId) {
 async function openMenu(message, sender) {
   const url = sender.url;
   const { state, logins } = await loginsFor(url);
-  // locked / unpaired / app-not-running are worth saying on a password field
-  // (or next to one), never on every username-looking field of the web
+  // "locked" and "no vault yet" are worth saying on a password field (or next
+  // to one), never on every username-looking field of the web
   const loginContext = message.field === "password" || message.password_nearby === true;
-  const show =
-    state === "matches" ||
-    (loginContext && (state === "locked" || state === "not_paired" || state === "app_not_running"));
+  const show = state === "matches" || (loginContext && (state === "locked" || state === "no_vault"));
   if (!show) return { show: false };
   const insecure = plainHttp(url);
   const token = newToken();
@@ -171,8 +161,7 @@ async function openMenu(message, sender) {
   });
   let height = MENU_HEADER_PX + (insecure ? MENU_WARNING_PX : 0);
   if (state === "matches") height += Math.min(logins.length, MENU_VISIBLE_ROWS) * MENU_ROW_PX;
-  else if (state === "locked") height += MENU_ROW_PX + 48;
-  else height += 60;
+  else height += MENU_ROW_PX + 48; // the one row that opens the unlock or set-up page
   return { show: true, token, height };
 }
 
@@ -196,7 +185,7 @@ async function handleMenu(message, sender) {
       return reply;
     }
     case "menu_unlock":
-      return vaultRequest("show_unlock", {});
+      return local.localRequest("show_unlock", {});
     case "menu_dismiss":
       await closeMenu(tabId);
       return { ok: true };
@@ -238,11 +227,11 @@ async function classify(candidate) {
   const found = await loginsFor(candidate.url);
   if (found.state === "locked") return { kind: "save", locked: true };
   if (found.state === "none") return { kind: "save", locked: false };
-  if (found.state !== "matches") return { kind: "none" }; // no app or not paired: nowhere to save
+  if (found.state !== "matches") return { kind: "none" }; // no vault yet: nowhere to save
   const wanted = candidate.username.trim().toLowerCase();
   const account = found.logins.find((login) => login.username.trim().toLowerCase() === wanted);
   if (!account) return { kind: "save", locked: false };
-  const secret = await vaultRequest("get_secret", { entry_id: account.id, url: candidate.url });
+  const secret = await local.localRequest("get_secret", { entry_id: account.id, url: candidate.url });
   if (secret.ok && secret.result.password === candidate.password) return { kind: "same" };
   return { kind: "update", locked: false, entryId: account.id, title: account.title };
 }
@@ -313,9 +302,9 @@ async function resolveCandidate(candidate, action) {
   if (candidate.locked) {
     // the vault was locked when you submitted: look again now
     const verdict = await classify(candidate);
-    if (verdict.kind === "none") return fail("app_not_running");
+    if (verdict.kind === "none") return fail("no_vault");
     if (verdict.locked) {
-      await vaultRequest("show_unlock", {});
+      await local.localRequest("show_unlock", {});
       return fail("locked");
     }
     if (verdict.kind === "same") {
@@ -330,19 +319,19 @@ async function resolveCandidate(candidate, action) {
   const host = new URL(current.origin).host;
   const reply =
     action === "save"
-      ? await vaultRequest("save_login", {
+      ? await local.localRequest("save_login", {
           url: current.url,
           username: current.username,
           password: current.password,
           title: host,
         })
-      : await vaultRequest("update_password", {
+      : await local.localRequest("update_password", {
           entry_id: current.entryId,
           url: current.url,
           new_password: current.password,
         });
   if (!reply.ok) {
-    if (reply.error && reply.error.code === "locked") await vaultRequest("show_unlock", {});
+    if (reply.error && reply.error.code === "locked") await local.localRequest("show_unlock", {});
     return reply;
   }
   await clearCandidate(current, PROMPT_CLOSE_DELAY_MS);
@@ -410,28 +399,14 @@ async function handlePrompt(message, sender) {
 async function handlePopup(message) {
   switch (message.type) {
     case "status":
-      return vaultRequest("hello", {
+      return local.localRequest("hello", {
         extension_version: chrome.runtime.getManifest().version,
       });
-
-    case "pair": {
-      // the popup makes the key (it shows the code derived from it first); a
-      // caller that sends none gets a fresh one here
-      const key = message.key || newPairingKey();
-      const reply = await nativeRequest("pair_request", {
-        key,
-        browser_name: browserName(),
-      });
-      if (reply.ok && reply.result && reply.result.paired) {
-        await store.set({ pairing_key: key });
-      }
-      return reply;
-    }
 
     case "get_logins": {
       const tab = await targetTab();
       if (!tab) return fail("no_tab");
-      const reply = await vaultRequest("get_logins", { url: tab.url });
+      const reply = await local.localRequest("get_logins", { url: tab.url });
       return { ...reply, tab_url: tab.url };
     }
 
@@ -445,13 +420,13 @@ async function handlePopup(message) {
     }
 
     case "lock":
-      return vaultRequest("lock", {});
+      return local.localRequest("lock", {});
 
     case "unlock":
-      return vaultRequest("show_unlock", {});
+      return local.localRequest("show_unlock", {});
 
     case "save_login":
-      return vaultRequest("save_login", {
+      return local.localRequest("save_login", {
         url: message.url,
         username: message.username,
         password: message.password,
@@ -459,7 +434,7 @@ async function handlePopup(message) {
       });
 
     case "generate":
-      return vaultRequest("generate_password", {});
+      return local.localRequest("generate_password", {});
 
     case "pending_save": {
       const candidate = await pendingCandidate();
@@ -483,7 +458,6 @@ async function handlePopup(message) {
 
 const POPUP_TYPES = new Set([
   "status",
-  "pair",
   "get_logins",
   "fill",
   "lock",
@@ -504,7 +478,6 @@ const PAGE_TYPES = new Set([
 const MENU_TYPES = new Set(["menu_data", "menu_fill", "menu_unlock", "menu_dismiss"]);
 const EXT_TYPES = new Set([
   "ext_state",
-  "ext_set_mode",
   "ext_create_profile",
   "ext_rename_profile",
   "ext_delete_profile",
@@ -542,7 +515,6 @@ async function extState() {
   return {
     ok: true,
     result: {
-      mode: await local.mode(),
       // names and linked accounts only — never anything from inside a vault
       profiles: profiles.map(({ id, name, googleEmail }) => ({ id, name, googleEmail })),
       unlocked: record ? { profileId: record.profileId, expiresAt: record.expiresAt } : null,
@@ -567,8 +539,6 @@ async function handleExt(message) {
   switch (message.type) {
     case "ext_state":
       return extState();
-    case "ext_set_mode":
-      return local.setMode(args.mode);
     case "ext_create_profile":
       return local.createProfile(args.name, args.password);
     case "ext_rename_profile":
@@ -629,7 +599,7 @@ async function handleExt(message) {
 // Lock when the OS locks the screen — only if the owner turned it on and
 // granted the optional "idle" permission.
 function onIdleState(state) {
-  if (state === "locked") vaultRequest("lock", {});
+  if (state === "locked") local.lock();
 }
 
 async function watchIdle() {
@@ -650,7 +620,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // The lock shortcut works in both modes.
 chrome.commands.onCommand.addListener((command) => {
-  if (command === "lock-vault") vaultRequest("lock", {});
+  if (command === "lock-vault") local.lock();
 });
 
 async function route(message, sender) {

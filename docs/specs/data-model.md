@@ -1,139 +1,93 @@
 # Data model and file formats
 
-> Source: design pack v0.1, section 6. Status: accepted at gate G0 (2026-10-15).
+> Rewritten 2026-11-05 for the extension-only product (ADR-012). The vault format, the entry fields
+> and the matching rules are unchanged from the original design, so a vault made by the old desktop
+> app opens here and the reverse.
 
-The app stores four things: a plaintext profile list, one encrypted KDBX 4 vault per profile,
-a plaintext sync-state file per profile, and plaintext settings. Only the vault holds
-secrets. Every other file is safe to read, but must never gain a secret field.
+The extension stores three things: one encrypted KDBX 4 vault per profile, bookkeeping about each
+(sync state, status), and a profile list with settings. Only the vault holds secrets. Everything
+else is safe to read but must never gain a secret field (I1).
 
-## On-disk layout
+## Where it lives
 
-The app folder comes from `platformdirs` (for example `%APPDATA%\PersonalVault` on Windows).
-Development and test runs override it with `PV_DATA_DIR`.
+IndexedDB `personal-vault`, version 1 (`extension/idb.js`):
 
-```text
-PersonalVault/
-  profiles.json                          # profile list, no secrets
-  settings.json                          # app settings, no secrets
-  logs/app.log                           # redacted, rotated at 1 MB
-  profiles/<profile_id>/
-    vault.kdbx                           # the encrypted vault
-    backups/                             # verified encrypted copies
-      vault-20261015T101500Z-0042.kdbx
-    sync/
-      state.json                         # sync bookkeeping, no secrets
-      incoming/                          # downloaded file waiting for verification
-      conflicts/                         # remote copies kept after a conflict
-```
+| Store | Key | Holds |
+| --- | --- | --- |
+| `vaults` | `profileId` | `{profileId, bytes, sha256, md5, savedAt}`: the encrypted KDBX file |
+| `backups` | auto id, index `profileId` | `{profileId, bytes, savedAt}`: the 20 newest previous files |
+| `sync` | `profileId` | the sync state below |
+| `conflicts` | auto id, index `profileId` | `{profileId, bytes, keptAt, remote_md5, remote_version}`: Drive copies kept after a conflict |
 
-Every JSON file and the vault are written atomically: write a temp file in the same folder,
-flush it, then rename it over the original. Every JSON file carries `schema_version`. A file
-with a newer version than the app understands is opened read-only and never overwritten.
+`chrome.storage.local`: `profiles` (`[{id, name, createdAt, googleEmail}]`), `settings`
+(`googleClientId`, `lockOnScreenLock`), `last_profile_id`, `offer_to_save`, `never_save` (site
+origins), `sync_status:<profileId>`. Older versions also wrote `mode` and `pairing_key`; they are
+ignored, not deleted.
 
-## profiles.json
+`chrome.storage.session` (memory only): `unlocked`, `drive_token:<profileId>`, `menu_<tabId>`,
+`pending_save`, `username_step`, `login_seen`.
 
-```json
-{
-  "schema_version": 1,
-  "last_used_profile_id": "p_4kq7m2xw",
-  "profiles": [
-    {
-      "id": "p_4kq7m2xw",
-      "display_name": "Personal",
-      "created_at": "2026-10-15T10:15:00Z",
-      "sync_enabled": false
-    }
-  ]
-}
-```
+**The schema is a contract.** The extension ID and these names do not change without a migration
+and a test for it (`app/tests/e2e/test_upgrade.py`).
 
-The profile ID is random, so renaming a profile never moves files. Display names are visible
-to anyone who can read your disk. Profiles are labels for one person's own accounts (for
-example Work, Social Media, School) — not a separation between people.
+The profile id is random, `p_` plus six random bytes in URL-safe base64, so renaming a profile
+changes nothing stored. It is also the vault's `pm_profile_id` on Drive. Profile names are visible
+to anyone who can read the browser profile. Profiles are labels for one person's own accounts
+(Work, School), not a separation between people.
 
 ## Inside each vault (KDBX 4)
 
 | Setting | Value |
 | --- | --- |
-| Format | KDBX 4.x |
-| Key derivation | Argon2id, 128 MiB, parallelism 2, iterations calibrated at creation |
-| Cipher | ChaCha20 or AES-256, whichever pykeepass writes reliably (confirmed in M0) |
+| Format | KDBX 4.0 |
+| Key derivation | Argon2id, 128 MiB, parallelism 2, iterations calibrated at creation (about a second in the browser); a vault made elsewhere keeps its own settings |
+| Cipher | AES-256 |
 | History per entry | 10 previous versions |
-| Groups | `Logins` (default), `Recycle Bin`, `.app` (hidden in our UI) |
+| Groups | `Logins`, `Recycle Bin`, and a hidden `.app` group |
 
-Key derivation is calibrated for desktop use only (open question Q3: no phone access).
-
-The hidden `.app` group holds two entries that the app manages:
-
-- `drive-sync`: the refresh token in the protected Password field, plus the account email and
-  the Drive file IDs.
-- `browser-pairing`: the extension pairing key.
-
-KeePassXC shows both with a "do not edit" note.
+The `.app` group is the original desktop app's: it held `drive-sync` (a Drive refresh token) and
+`browser-pairing`. The extension never reads or writes it and keeps it intact when a vault that has
+one is opened and saved. (The old desktop app's refresh token inside a vault is one reason to treat
+every copy of such a vault as sensitive.)
 
 ## Login entry
 
-| App field | Stored in KDBX as | Rules |
+| Field | Stored in KDBX as | Rules |
 | --- | --- | --- |
-| `id` | Entry UUID | Never changes; the merge key for sync |
-| `title` | Title | 1–200 characters |
+| `id` | Entry UUID | Never changes; the merge key |
+| `title` | Title | 1 to 200 characters |
 | `username` | UserName | Up to 500 characters |
-| `password` | Password (protected field) | Up to 4,096 characters; wrapped in `SecretStr` in Python |
-| `urls` | URL, then extra URLs as `KP2A_URL_1`, `KP2A_URL_2`, … | `http` or `https` only; the same convention KeePassXC uses |
+| `password` | Password (protected field) | Up to 4,096 characters |
+| `urls` | URL, then extra URLs as `KP2A_URL_1`, `KP2A_URL_2`, … | `http` or `https` only; up to 20; the same convention KeePassXC uses |
 | `notes` | Notes | Up to 64 KiB |
 | `tags` | Tags | Up to 20 |
-| `match_subdomains` | Custom field `PM_MATCH_SUBDOMAINS` | Default `false` |
-| `created_at`, `updated_at` | Times: creation, last modification | UTC; merge uses `updated_at` |
-| `deleted` | Moved to Recycle Bin; emptying it records a tombstone | Tombstones support merge in M6 |
+| `match_subdomains` | Custom field `PM_MATCH_SUBDOMAINS` | `"true"` or `"false"`; default false |
+| `created_at`, `updated_at` | Times | UTC |
+| deleted | Moved to the Recycle Bin; the move is time-stamped | |
 
-## Python domain model
-
-The UI and the bridge use these types and never touch pykeepass objects, which keeps the
-library replaceable.
-
-```python
-class SecretStr:
-    """Holds a secret; repr() and str() print '***' so it never lands in logs."""
-
-    def reveal(self) -> str: ...
-
-
-@dataclass(frozen=True)  # what search results and the browser list get
-class LoginSummary:
-    id: UUID
-    title: str
-    username: str
-    hosts: tuple[str, ...]
-
-
-@dataclass  # what the edit form gets
-class LoginEntry:
-    id: UUID
-    title: str
-    username: str
-    password: SecretStr
-    urls: list[str]
-    notes: str
-    tags: list[str]
-    match_subdomains: bool
-    created_at: datetime
-    updated_at: datetime
-```
+A login saved from a page is stored with the page's origin only (`https://host[:port]/`, never the
+path or the query string, which can carry tokens) and titled with the host.
 
 ## Site matching rules
 
-1. Lower-case the hostname, convert international names to punycode, and drop a trailing dot.
+`extension/matching.js`, equal to `app/src/personal_vault/core/matching.py` (tested on a table of
+URLs):
+
+1. Lower-case the hostname, convert international names to punycode, drop a trailing dot.
 2. Match when the page hostname equals an entry hostname.
-3. If `match_subdomains` is on, also match `*.entry-hostname`, but never the parent domain.
-4. Never fill an `https` entry into an `http` page. An `http` entry fills only on `http`,
-   with a warning in the popup.
+3. If `match_subdomains` is on, also match `*.entry-hostname`, never the parent domain.
+4. Never fill an `https` entry into an `http` page. An `http` entry fills only on `http`, with a
+   warning shown.
 5. Ports must match when the entry URL names one.
 
-## sync/state.json
+`http` on `localhost` and `127.0.0.1` is treated as secure for the purposes of offering to save
+(it never leaves the machine); any other plain `http` page is never offered for saving.
+
+## Sync state (the `sync` store)
 
 ```json
 {
-  "schema_version": 1,
+  "profileId": "p_4kq7m2xw",
   "drive_folder_id": "1Fold3r...",
   "drive_file_id": "1F1le...",
   "last_synced_remote_version": 42,
@@ -142,30 +96,29 @@ class LoginEntry:
   "local_dirty": true,
   "last_success_at": "2026-10-15T10:20:00Z",
   "last_error": null,
-  "conflict": null
+  "conflict": null,
+  "linked_from": "adopt"
 }
 ```
 
-When a conflict exists, `conflict` holds the detection time, the remote version, and the path
-of the kept copy.
+When a conflict exists, `conflict` holds the detection time, the remote version and md5, and the
+id of the kept copy in the `conflicts` store.
 
-## settings.json defaults
+## Settings and fixed values
 
-| Setting | Default |
+| Setting | Value |
 | --- | --- |
-| `idle_lock_minutes` | 5 |
-| `lock_on_sleep` | `true` |
-| `clipboard_clear_seconds` | 30 |
-| `backups_keep_recent` | 20 saves |
-| `backups_keep_daily` | 30 days |
-| `sync_interval_minutes` | 60 |
-| `upload_quiet_seconds` | 10 |
-| `generator` | Length 20; upper, lower, digits, symbols; exclude look-alike characters |
+| Unlock lasts | 6 hours, absolute (`config.js` `UNLOCK_HOURS`) |
+| Upload quiet period | 10 seconds |
+| Sync interval | 60 minutes while unlocked |
+| Backups kept | 20 per profile |
+| Clipboard clear | 30 seconds after Copy on the vault page |
+| Generator | Length 20; upper, lower, digits, symbols; look-alike characters (`0Oo1lI\|`) excluded; randomness from `crypto.getRandomValues` |
+| Master password | At least 12 characters |
+| Lock when the screen locks | Off by default; needs the optional `idle` permission |
 
-## Import and export
+## Export
 
-- The default export is an encrypted KDBX copy, optionally under a new password.
-- Plaintext CSV export exists only behind invariant I8: it needs the master password again
-  and an explicit confirmation.
-- Imports accept KDBX and CSV. They are parsed as untrusted input with size limits, and land
-  in a new group for review.
+The vault page's **Export encrypted copy** downloads the stored `.kdbx` as it is (the same master
+password opens it in KeePassXC). There is no plaintext export and no import from a file; a vault
+comes in through Google Drive.

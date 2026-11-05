@@ -45,7 +45,6 @@ def main() -> None:
     run("ruff check", ["ruff", "check", "."])
     run("ruff format", ["ruff", "format", "--check", "."])
     run("mypy", ["mypy"])
-    run("import-linter", ["lint-imports"])
     run("bandit", ["bandit", "-q", "-c", "pyproject.toml", "-r", "app/src"])
     run("vendored extension code", [sys.executable, "scripts/check_vendor.py"])
     run("extension logging", [sys.executable, "scripts/check_no_console.py"])

@@ -1,6 +1,6 @@
 # ADR-008 The "M4.0" task and host path ownership
 
-Status: Accepted
+Status: Superseded by ADR-013
 Date: 2026-10-15
 
 ## Context

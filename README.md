@@ -1,116 +1,97 @@
 # mainPasswort
 
-A personal, local-first password manager for the desktop, with a browser extension and
-optional Google Drive sync. The design spec calls it **Personal Vault**.
+A personal password manager that **lives in your browser**: a Chrome and Brave extension that
+keeps your encrypted vault in the browser, fills and saves logins on any site, and syncs the
+encrypted file to your own Google Drive. There is no server, no account with us and no desktop
+program to run. The extension is called **Personal Vault**.
 
-> **Status: M0–M6 complete (2026-10-16).** The desktop app, the browser extension, Drive
-> sync, the two-sided conflict merge, the hardening audit and the packaged build are all in,
-> with an install and update guide in [docs/install.md](docs/install.md). Gates **G2** (a
-> signed `[S]` read-through) and **G4** (the two-device Drive test) are still open, so do not
-> put a real password in it yet, and do not turn sync on for a real vault. See
-> [Known limitations](docs/known-limitations.md) before you trust it with anything.
+> **Status:** extension-only since 2026-11-05 ([ADR-012](docs/adr/0012-extension-only.md),
+> [ADR-013](docs/adr/0013-desktop-app-removed.md)). Gates G2 (a signed `[S]` read-through) and G5 (an
+> outside security review) are still open, so read
+> [Known limitations](docs/known-limitations.md) before you trust it with a password you
+> would miss.
 
 ## Security limits: read this first
 
-This app protects vault files at rest (on disk, in backups and on Google Drive) and limits
+The extension protects your vault files at rest (browser storage, backups, Google Drive) and limits
 what a web page can extract. It **cannot** protect you from:
 
 - malware running as your OS user, such as keyloggers or memory and clipboard readers,
-- a compromised operating system,
+- a compromised browser, or a malicious copy of this extension (the vault is decrypted **inside
+  the browser** while unlocked, for up to six hours),
 - a weak master password.
 
-Profiles do not separate people who share one OS login. Anyone with that login can install a
-keylogger, so give each person their own OS account. There is no backdoor: if you forget the
-master password, the vault cannot be opened. See
-[docs/specs/threat-model.md](docs/specs/threat-model.md), and
-[docs/known-limitations.md](docs/known-limitations.md) for everything else this app does not
-do — including the parts that have not been reviewed by anyone outside this project.
+There is no backdoor: if you forget the master password, the vault cannot be opened. Removing the
+extension or clearing its data **deletes the vaults kept in the browser**; keep Google Drive sync on
+or export a copy. See [docs/specs/threat-model.md](docs/specs/threat-model.md).
 
 ## Features
 
-Built and tested through M5:
+- **Several profiles**, each with its own vault, its own master password and its own Google
+  account. Only the unlocked profile's logins are ever shown or filled.
+- **Standard KeePass vaults** (KDBX 4: Argon2id, 128 MiB, AES-256), so KeePassXC can open any
+  vault if this extension ever breaks.
+- **A suggestion menu** under login fields: click a saved login to fill it. It fills only after
+  your click, in the top frame, on the exact site (no look-alike domains), and never submits.
+- **A "Save this login?" / "Update saved password?" prompt** after you sign in, with Save, Not now
+  and Never for this site. Works for plain forms, two-step logins and single-page apps.
+- **Lock** with one click or **Alt+Shift+L**; an unlock lasts at most six hours and ends when the
+  browser closes. Optionally lock when the screen locks.
+- **Google Drive sync** of the encrypted file with the `drive.file` scope only: it uploads about 10
+  seconds after a change, and also on unlock, hourly and when the network returns. Every failure is
+  shown and explained; a change is never lost because an upload failed; a copy it has not seen is
+  never overwritten.
+- A password **generator**, search, edit and delete (to a Recycle Bin), and an encrypted export.
 
-- Separate **profiles** (labels for your own accounts, e.g. Work, Social Media, School),
-  each stored as a standard KeePass **KDBX 4** file, so KeePassXC can always open a vault if
-  this app breaks
-- Add, edit, delete and search logins, plus a password **generator**
-- Manual lock, idle auto-lock, lock on sleep, and clipboard auto-clear
-- Safe saves with a read-back check and rotating encrypted backups
-- A minimal **desktop app** (PySide6)
-- A **browser extension** for Chrome and Brave: a menu on login fields that fills a login
-  only after you click it, in the top frame only, with exact site matching, and a prompt to
-  save or update a login after you sign in
-- **Google Drive sync** of the encrypted file that detects conflicts and keeps both copies
-- **Extension-only mode**: the extension on its own, with the vault kept in the browser and
-  synced to the same Drive files — no desktop app needed, at a security cost spelled out in
-  [docs/setup-browser.md](docs/setup-browser.md#extension-only-mode-no-desktop-app)
+Not included: TOTP codes, passkeys, attachments, shared vaults, a phone app, fill on page load,
+biometrics, breach checks, Firefox, restoring a backup from the interface, changing the master
+password, and importing a file from disk. See [Known limitations](docs/known-limitations.md).
 
-Not in v1: TOTP codes, passkeys, attachments, shared vaults, a mobile app, autofill on page
-load, unlocking from the browser, biometrics, breach checks, Firefox and auto-update.
+## Install
 
-## Tech stack
+You need Chrome or Brave (Chromium 116 or newer, which the engine's `getContexts` call needs) and, for sync, a Google Cloud project of your own.
+The extension is loaded unpacked from this repository; there is no store listing.
 
-Python 3.12+, PySide6, pykeepass (KDBX 4), the Google Drive REST API with the `drive.file`
-scope, and a plain-JavaScript Manifest V3 extension with no build step. Tooling: uv, ruff,
-mypy, pytest, pip-audit and gitleaks. The reasons for each choice are in
-[docs/adr/](docs/adr/).
+1. Clone the repository: `git clone https://github.com/JisanAR03/mainPasswort.git`
+2. Open `chrome://extensions` (Brave: `brave://extensions`), turn on **Developer mode**, click
+   **Load unpacked** and choose the `extension` folder. The extension ID is
+   `pkmjgefocdecdncjcpdlohfnahebkkpi`; it is fixed by the key in `manifest.json`, so your data
+   survives a reload.
+3. Pin it (puzzle-piece icon), open it, and **Create a vault**.
+4. Optional but recommended: connect Google Drive and turn off the browser's own password manager.
+   [docs/setup-browser.md](docs/setup-browser.md) has every step.
 
-## Setup
+## Develop and test
 
-Prerequisites.
-
-- Git
-- Python 3.12 or newer
-- [uv](https://docs.astral.sh/uv/)
-- [KeePassXC](https://keepassxc.org/), which includes `keepassxc-cli`
-- Google Chrome and/or Brave
-
-```sh
-git clone https://github.com/JisanAR03/mainPasswort.git
-cd mainPasswort
-cp .env.example .env    # local only, never committed
-uv sync                 # create the virtual env from pyproject.toml
-```
-
-## How to run
+The product is `extension/`: plain JavaScript, no build step, no npm. `app/` is a Python reference
+implementation of the vault format that the tests check the extension against; nothing in it ships.
 
 ```sh
-uv sync                                                  # create the virtual env from uv.lock
-uv run --env-file .env python -m personal_vault          # start the desktop app
-uv run python scripts/check.py                           # run every lint, type and test check
-uv run pytest -m "not e2e and not slow"                  # quick test loop
+uv sync --all-groups                    # Python tools, pykeepass and Playwright
+uv run playwright install chromium      # once
+uv run python scripts/check.py          # ruff, mypy, bandit, vendored-code and logging checks, unit tests
+uv run pytest -m e2e                    # the extension in a real browser, against a fake Google
+PV_E2E_BROWSER=chrome uv run pytest -m e2e   # or brave (the installed browsers)
 ```
 
-Development and test runs must always set `PV_DATA_DIR` to a throwaway folder (see
-`.env.example`), so they never touch a real vault. Real passwords go into the app only after
-gate G2.
-
-To run it without a checkout — a folder you copy to another machine — build the packaged app:
-[docs/install.md](docs/install.md).
-
-The browser extension and Drive sync each have their own setup:
-[docs/setup-browser.md](docs/setup-browser.md) and
-[docs/setup-google-drive.md](docs/setup-google-drive.md).
+Tests use fake vaults, a fake Google and temporary browser profiles; they never touch a real vault.
+`KEEPASSXC_CLI` can point at `keepassxc-cli` (it is found automatically on a default Windows or
+Linux install) so the KeePassXC compatibility tests run.
 
 ## Documentation
 
 | Document | Contents |
 | --- | --- |
-| [Architecture](docs/specs/architecture.md) | Components, layer rules, key flows and the planned project structure |
-| [Threat model](docs/specs/threat-model.md) | What is protected, trust boundaries, threats and security invariants I1–I10 |
-| [Data model](docs/specs/data-model.md) | On-disk layout, file formats, vault contents, domain types and site matching |
-| [Sync spec](docs/specs/sync.md) | Google Drive sync: permissions, decision table, race handling |
-| [Browser protocol](docs/specs/browser-protocol.md) | Extension design, native host, message envelope and message list |
-| [Milestones](docs/specs/milestones.md) | Gates G0–G5, milestones M0–M6 and the development workflow |
-| [ADRs](docs/adr/) | Architecture decision records and the owner's decision log |
-| [References](docs/specs/references.md) | External references and source material |
+| [Setup](docs/setup-browser.md) | Install, Google Drive, using it, the browser settings that make it your primary manager, troubleshooting |
 | [Known limitations](docs/known-limitations.md) | What it does not do, does not protect against, and has not had checked |
-| [Recovery](docs/recovery.md) | Getting a vault back: local backup, Drive revision, KeePassXC |
-| [Manual tests](docs/manual-tests.md) | The owner's test script (gate G2) and the recovery drill (G5) |
-| [Install and update](docs/install.md) | Building the app into a folder that runs without Python, and replacing it |
-| [Task cards](docs/tasks/) | One card per task: what was built, and what proves it |
+| [Recovery](docs/recovery.md) | Getting your passwords back: backups, Drive versions, KeePassXC |
+| [Manual tests](docs/manual-tests.md) | The checks only a person can do, and the `[S]` review list |
+| [Architecture](docs/specs/architecture.md), [threat model](docs/specs/threat-model.md), [data model](docs/specs/data-model.md), [sync](docs/specs/sync.md), [messaging](docs/specs/browser-protocol.md) | The design |
+| [Decisions](docs/adr/) | Why each choice was made (ADR-012 and ADR-013 are the current shape) |
+| [Task cards and spikes](docs/tasks/), [docs/spikes/](docs/spikes/) | The history of how it was built |
 
 ## License
 
-No license has been chosen yet (open decision, ADR-007). Until a license file is added, all
-rights are reserved.
+No license has been chosen yet (ADR-007), so all rights are reserved and you may read but not reuse
+this code. The extension ships no GPL code (kdbxweb and hash-wasm are MIT); the Python reference
+uses pykeepass (GPL-3.0) in the tests only.

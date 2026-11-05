@@ -37,7 +37,7 @@ async function render() {
   $("save").textContent = kind === "update" ? `Update ${title}` : "Save";
   $("save").dataset.action = kind === "update" ? "update" : "save";
   $("message").hidden = true;
-  if (locked) say("The vault is locked: unlock it in the desktop app first.");
+  if (locked) say("The vault is locked: unlock it first.");
 }
 
 async function act(action) {
@@ -52,9 +52,9 @@ async function act(action) {
     return;
   }
   const code = reply.error ? reply.error.code : "internal";
-  if (code === "locked") say("Unlock the vault in the desktop app, then click again.");
+  if (code === "locked") say("Unlock the vault in the tab that opened, then click again.");
+  else if (code === "no_vault") say("There is no vault yet: create one in the tab that opened.");
   else if (code === "reclassified") await render();
-  else if (code === "app_not_running") say("Start the Personal Vault desktop app, then click again.");
   else say(`Could not save (${code}).`);
 }
 

@@ -1,6 +1,6 @@
-// Extension-only mode, service-worker side ([S]): profiles, unlock and lock,
-// and the vault requests the desktop app would otherwise answer over native
-// messaging — answered here by the offscreen vault engine (engine.js).
+// The vault, service-worker side ([S]): profiles, unlock and lock, and every
+// vault request the popup, the in-page menu and the save prompt make —
+// answered here by the offscreen vault engine (engine.js).
 //
 // Where the key lives (ADR-012, invariant I11): an unlock keeps exactly one
 // record in chrome.storage.session —
@@ -67,19 +67,10 @@ export async function engine(op, args = {}) {
   }
 }
 
-// --- mode and profiles ------------------------------------------------------------
+// --- profiles ---------------------------------------------------------------------
 
-export async function mode() {
-  const { mode: value } = await chrome.storage.local.get("mode");
-  return value === "extension" ? "extension" : "desktop";
-}
-
-export async function setMode(value) {
-  if (value !== "extension" && value !== "desktop") return fail("bad_request");
-  if (value === "desktop") await lock();
-  await chrome.storage.local.set({ mode: value });
-  return { ok: true, result: { mode: value } };
-}
+// (Older versions also stored a "mode" key and a "pairing_key"; nothing reads
+// them any more and nothing deletes them, so a downgrade finds what it expects.)
 
 export async function profiles() {
   const { profiles: list } = await chrome.storage.local.get("profiles");
@@ -99,8 +90,8 @@ export async function updateProfile(profileId, change) {
   return list[index];
 }
 
-// The desktop format, "p_" + 6 random bytes in URL-safe base64, so a profile
-// linked to a desktop vault can keep that vault's pm_profile_id.
+// "p_" + 6 random bytes in URL-safe base64 — the format the original desktop app
+// used, so a vault made there keeps the profile id its Drive file is tagged with.
 function newProfileId() {
   const raw = crypto.getRandomValues(new Uint8Array(6));
   const b64 = btoa(String.fromCharCode(...raw)).replace(/\+/g, "-").replace(/\//g, "_");
@@ -228,20 +219,32 @@ export async function lock() {
   hooks.locked();
 }
 
-// --- what the desktop app answers over native messaging -----------------------------
+// --- the requests the popup, the in-page menu and the save prompt make ---------------
 
 async function profileName(profileId) {
   const profile = (await profiles()).find((p) => p.id === profileId);
   return profile ? profile.name : "";
 }
 
+// Bring the unlock page forward: the vault page if it is already open, else a
+// new tab. (chrome.action.openPopup is not used: it behaves differently from
+// browser to browser, and a tab can be tested.)
 async function showUnlock() {
-  try {
-    await chrome.action.openPopup();
-  } catch {
-    await chrome.tabs.create({ url: chrome.runtime.getURL("vault.html#unlock") });
+  const page = chrome.runtime.getURL("vault.html");
+  const [open] = await chrome.tabs.query({ url: `${page}*` });
+  if (open) {
+    await chrome.tabs.update(open.id, { active: true });
+    await chrome.windows.update(open.windowId, { focused: true });
+  } else {
+    await chrome.tabs.create({ url: `${page}#unlock` });
   }
   return { ok: true, result: { shown: true } };
+}
+
+// The reason ensureOpen() found nothing: "no_vault" before the first vault exists,
+// else "locked".
+async function closedBecause() {
+  return (await profiles()).length === 0 ? "no_vault" : "locked";
 }
 
 export async function localRequest(type, payload = {}) {
@@ -255,24 +258,23 @@ export async function localRequest(type, payload = {}) {
           app_version: chrome.runtime.getManifest().version,
           state: record ? "unlocked" : "locked",
           profile_name: await profileName(record ? record.profileId : last),
-          mode: "extension",
         },
       };
     }
     case "get_logins": {
-      if (!(await ensureOpen())) return fail("locked");
+      if (!(await ensureOpen())) return fail(await closedBecause());
       const reply = await engine("matches", { url: payload.url });
       if (!reply.ok) return reply;
       if (reply.result.logins.length === 0) return fail("no_match");
       return { ok: true, result: { logins: reply.result.logins.slice(0, 20) } };
     }
     case "get_secret": {
-      if (!(await ensureOpen())) return fail("locked");
+      if (!(await ensureOpen())) return fail(await closedBecause());
       return engine("secret", { entryId: payload.entry_id, url: payload.url });
     }
     case "save_login": {
       const record = await ensureOpen();
-      if (!record) return fail("locked");
+      if (!record) return fail(await closedBecause());
       const reply = await engine("save_login", {
         url: payload.url,
         username: payload.username,
@@ -284,7 +286,7 @@ export async function localRequest(type, payload = {}) {
     }
     case "update_password": {
       const record = await ensureOpen();
-      if (!record) return fail("locked");
+      if (!record) return fail(await closedBecause());
       const reply = await engine("update_password", {
         entryId: payload.entry_id,
         url: payload.url,
@@ -301,7 +303,7 @@ export async function localRequest(type, payload = {}) {
     case "show_unlock":
       return showUnlock();
     default:
-      return fail("bad_request"); // pairing has no meaning without the desktop app
+      return fail("bad_request");
   }
 }
 

@@ -3,17 +3,24 @@
 | # | Decision | Status |
 | --- | --- | --- |
 | [0001](0001-vault-format.md) | Vault format: KDBX 4 via pykeepass | Accepted |
-| [0002](0002-stack.md) | Stack: Python, PySide6, plain JavaScript | Accepted |
-| [0003](0003-browser-integration.md) | Browser integration: native messaging to a local socket | Accepted |
-| [0004](0004-sync.md) | Sync: whole encrypted file on Drive with version checks | Accepted |
+| [0002](0002-stack.md) | Stack: Python, PySide6, plain JavaScript | Superseded in part by 0012, 0013 |
+| [0003](0003-browser-integration.md) | Browser integration: native messaging to a local socket | Superseded by 0012 |
+| [0004](0004-sync.md) | Sync: whole encrypted file on Drive with version checks | Amended by 0012 |
 | [0005](0005-extension-before-sync.md) | Build the extension before sync | Accepted |
 | [0006](0006-conflicts.md) | Conflicts: keep both in v1, merge in M6 | Accepted |
 | [0007](0007-license.md) | License (open: see Q6) | Proposed |
-| [0008](0008-m4-host-paths.md) | The "M4.0" task: host paths are owned by M3-04 | Accepted |
+| [0008](0008-m4-host-paths.md) | The "M4.0" task: host paths are owned by M3-04 | Superseded by 0013 |
 | [0009](0009-security-review-trailer.md) | Where the Security-Reviewed-By trailer lives | Accepted |
 | [0010](0010-first-time-link.md) | First-time link and a lost state.json | Accepted |
+| [0012](0012-extension-only.md) | The vault lives in the browser extension | Accepted |
+| [0013](0013-desktop-app-removed.md) | The desktop app is removed; the extension is the product | Accepted |
 
-An accepted ADR is never edited; it is superseded by a newer one that says so.
+An accepted ADR is never edited; it is superseded by a newer one that says so. (Only the
+`Status:` line of an older record changes, to point at the record that replaced it.)
+
+> **2026-11-05:** the product is now the browser extension alone (ADR-012, ADR-013). The
+> decision log and spike notes below are the history of the desktop design and are kept as
+> written; where they name the desktop app, read them as the original design.
 
 ## Decision log (owner sign-off, 2026-10-15)
 
@@ -66,7 +73,7 @@ proposed, with the answers below.
   [docs/spikes/2026-10-15-browser-spike.md](../spikes/2026-10-15-browser-spike.md).
 - **ADR-004 confirmed in design, spike pending the owner** (M0-04): the round trip needs the
   throwaway Google account, so the spike is a ready-to-run script
-  (see [docs/setup-google-drive.md](../setup-google-drive.md)); the day-1 run and the 8-day
+  (see `docs/setup-google-drive.md`, since folded into [setup-browser.md](../setup-browser.md)); the day-1 run and the 8-day
   token test close it.
 
 ## Spec issues found during setup

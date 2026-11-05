@@ -14,29 +14,7 @@
     </header>
     <p id="notice" class="notice" role="status" hidden></p>
 
-    <!-- desktop mode: offer extension-only mode, and say what it gives up -->
-    <section id="view-mode" hidden>
-      <h2>Use Personal Vault without the desktop app</h2>
-      <p>
-        In extension-only mode your vaults live in this browser and everything — creating,
-        unlocking, editing, filling and Google Drive sync — happens here. The desktop app is not
-        needed.
-      </p>
-      <p><strong>What you give up compared with the desktop app:</strong></p>
-      <ul>
-        <li>The master password is typed into the browser, and the unlocked vault is held in
-          the browser's memory. A compromised browser, or a malicious copy of this extension,
-          exposes the vault.</li>
-        <li>An unlock lasts up to 6 hours (or until the browser closes), not 5 minutes of idle
-          time. Lock it when you step away, or turn on "lock when the screen locks".</li>
-        <li>The vault file lives in this browser's own storage. Removing the extension or
-          clearing its data deletes it — keep Google Drive sync on, or export a copy.</li>
-        <li>Two third-party libraries (kdbxweb, hash-wasm) read and write the vault here.</li>
-      </ul>
-      <button id="use-extension" type="button">Use without the desktop app</button>
-    </section>
-
-    <!-- extension mode, no vault yet / adding one -->
+    <!-- no vault yet, or adding another -->
     <section id="view-create" hidden>
       <h2 id="create-heading">Create a vault</h2>
       <form id="create-form" autocomplete="off">
@@ -45,6 +23,12 @@
           <input id="create-password" type="password" minlength="12" required /></label>
         <label>Repeat the master password <input id="create-repeat" type="password" minlength="12" required /></label>
         <p class="hint">There is no way to recover a forgotten master password.</p>
+        <ul class="hint">
+          <li>Your vault is kept, encrypted, in this browser. Removing the extension or clearing
+            its data deletes it &mdash; connect Google Drive or export a copy.</li>
+          <li>While it is unlocked (up to 6 hours, or until the browser closes) the vault is
+            held in the browser's memory: lock it when you step away.</li>
+        </ul>
         <div class="row">
           <button id="create-submit" type="submit">Create vault</button>
           <button id="create-cancel" type="button" class="plain" hidden>Cancel</button>
@@ -52,7 +36,7 @@
       </form>
     </section>
 
-    <!-- extension mode, locked -->
+    <!-- locked -->
     <section id="view-unlock" hidden>
       <h2>Unlock</h2>
       <form id="unlock-form" autocomplete="off">
@@ -65,11 +49,11 @@
       </form>
     </section>
 
-    <!-- extension mode, no profile unlocked: a vault already on Google Drive -->
+    <!-- nothing unlocked: a vault that is already on Google Drive -->
     <section id="view-drive" hidden>
       <details id="drive-open">
         <summary>Open a vault that is already on Google Drive</summary>
-        <p class="hint">For a vault the desktop app (or another browser) syncs to Google Drive. Set
+        <p class="hint">For a vault another browser (or the old desktop app) syncs to Google Drive. Set
           the Google OAuth client ID first (it is asked for below if it is missing).</p>
         <label id="drive-client-row">Google OAuth client ID
           <input id="drive-client" type="text" spellcheck="false" /></label>
@@ -83,7 +67,7 @@
       </details>
     </section>
 
-    <!-- extension mode, unlocked -->
+    <!-- unlocked -->
     <section id="view-vault" hidden>
       <div class="columns">
         <div class="main">
@@ -168,7 +152,6 @@
               <label class="check"><input id="s-idle" type="checkbox" /> Lock when the screen locks</label>
               <button type="submit" class="plain">Save settings</button>
             </form>
-            <button id="use-desktop" type="button" class="plain">Switch back to the desktop app</button>
           </div>
         </aside>
       </div>

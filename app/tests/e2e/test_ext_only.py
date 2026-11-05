@@ -1,12 +1,12 @@
-"""Extension-only mode (docs/tasks/EXT-00-extension-only-mode.md): the vault
-lives in the browser, the desktop app is never needed — and is unreachable
-here: the extension under test connects to a native host nobody registers.
+"""The vault in the browser (docs/tasks/EXT-00-extension-only-mode.md): create,
+unlock, edit, fill, lock, several profiles, and Google Drive sync.
 
 Acceptance tests A1-A8 of the card. Drive is the fake Google in fake_google.py;
 vaults use weak KDF settings (test copy only, see conftest)."""
 
 from __future__ import annotations
 
+import base64
 import itertools
 import json
 import os
@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from conftest import EXT_PASSWORD, Ext, _launch, _seed_extension_mode
+from conftest import EXT_PASSWORD, Ext, _launch, _seed_settings
 from fixtures.weak_vault import WEAK_PASSWORD, build_weak_vault, make_login
 from personal_vault.core.matching import match_urls
 from personal_vault.core.models import SecretStr
@@ -33,7 +33,12 @@ CANARY = "CANARY-7f3a9c"
 
 
 def _cli() -> str | None:
-    return os.environ.get("KEEPASSXC_CLI") or shutil.which("keepassxc-cli")
+    """keepassxc-cli: KEEPASSXC_CLI, then PATH, then the default Windows install."""
+    found = os.environ.get("KEEPASSXC_CLI") or shutil.which("keepassxc-cli")
+    if found:
+        return found
+    windows_default = Path("C:/Program Files/KeePassXC/keepassxc-cli.exe")
+    return str(windows_default) if windows_default.exists() else None
 
 
 def _site(page_server: str) -> str:
@@ -73,7 +78,7 @@ def _open_in_pykeepass(tmp_path: Path, data: bytes, password: str) -> dict[str, 
 # --- A1: no desktop app anywhere --------------------------------------------------------
 
 
-def test_a1_create_add_fill_lock_unlock_with_no_desktop_app(ext: Ext, page_server: str) -> None:
+def test_a1_create_add_fill_lock_unlock(ext: Ext, page_server: str) -> None:
     vault = _open(ext, f"{EXTENSION_ORIGIN}/vault.html")
     vault.wait_for_selector("#view-create", state="visible")
     vault.fill("#create-name", "Personal")
@@ -103,12 +108,12 @@ def test_a1_create_add_fill_lock_unlock_with_no_desktop_app(ext: Ext, page_serve
     assert ext.state()["unlocked"] is None
     locked_page = _open(ext, _site(page_server))
     locked_page.click("#password")
-    assert _items(locked_page) == ["Unlock Personal Vault\nOpens the desktop app"]
+    assert _items(locked_page) == ["Unlock Personal Vault\nOpens the unlock page"]
 
     popup = _open(ext, f"{EXTENSION_ORIGIN}/popup.html")
-    popup.wait_for_selector("#ext-unlock", state="visible", timeout=30_000)
-    popup.fill("#ext-password", EXT_PASSWORD)
-    popup.click("#ext-unlock-button")
+    popup.wait_for_selector("#unlock-form", state="visible", timeout=30_000)
+    popup.fill("#password", EXT_PASSWORD)
+    popup.click("#unlock-button")
     popup.wait_for_function(
         "() => document.getElementById('status').textContent.startsWith('Unlocked')",
         timeout=60_000,
@@ -195,7 +200,7 @@ def test_a2_closing_the_browser_ends_the_unlock(
 ) -> None:
     profile_dir = tmp_path / "browser-profile"
     first = _launch(playwright_instance, profile_dir, ext_extension)
-    _seed_extension_mode(first)
+    _seed_settings(first)
     control = first.new_page()
     control.goto(f"{EXTENSION_ORIGIN}/popup.html")
     ext = Ext(first, control, None)  # type: ignore[arg-type]
@@ -482,6 +487,46 @@ def test_a7_a_trashed_file_asks_instead_of_recreating(ext: Ext) -> None:
     assert "missing or in the bin" in status["message"]
     files = [f for f in ext.google.files.values() if f.name == "vault.kdbx"]
     assert len(files) == 1, "never recreated silently"
+
+
+def test_i7_a_download_that_does_not_open_is_never_adopted(ext: Ext) -> None:
+    profile = ext.create_profile("Personal")
+    ext.add_login(title="Mine")
+    _connect(ext, profile)
+    stored = ext.ok("ext_export")["bytes"]
+    ext.google.write_from_other_device(profile, b"this is not a vault at all")
+    ext.ok("ext_sync_now")  # nothing changed here, the copy on Drive did: a download
+    status = ext.wait_status(profile, {"unreadable"})
+    assert "could not be opened" in status["message"]
+    assert [e["title"] for e in ext.ok("ext_list")["entries"]] == ["Mine"]
+    assert ext.ok("ext_export")["bytes"] == stored, "the vault was not replaced"
+
+
+def test_i6_a_first_link_never_overwrites_what_it_finds(ext: Ext) -> None:
+    profile = ext.create_profile("Personal")
+    ext.add_login(title="Local Only")
+    other = ext.google.put_vault(profile, b"another device's vault, already on Drive")
+    revisions = len(other.revisions)
+    ext.ok("ext_connect")  # this browser has no sync history for it: the first link
+    status = ext.wait_status(profile, {"first_link"})
+    assert "already on Google Drive" in status["message"]
+    assert len(ext.google.vault_of(profile).revisions) == revisions, "nothing was uploaded"
+    assert _drive_bytes(ext, profile) == b"another device's vault, already on Drive"
+
+
+def test_i10_drive_receives_exactly_the_stored_vault(ext: Ext) -> None:
+    profile = ext.create_profile("Personal")
+    ext.add_login(title="First")
+    _connect(ext, profile)
+    stored = base64.b64decode(ext.ok("ext_export")["bytes"])
+    assert _drive_bytes(ext, profile) == stored
+    ext.add_login(title="Second")
+    ext.wait_status(profile, {"synced"})
+    waited = 0
+    while _drive_bytes(ext, profile) == stored and waited < 60_000:
+        ext.control.wait_for_timeout(250)
+        waited += 250
+    assert _drive_bytes(ext, profile) == base64.b64decode(ext.ok("ext_export")["bytes"])
 
 
 _STATES: list[SyncState | None] = [None] + [

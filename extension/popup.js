@@ -1,8 +1,10 @@
-// The popup ([S]-adjacent): lists matches for the tab, starts a fill, and
-// offers lock, unlock, pairing and the add form. It never receives a password:
-// fills run in the service worker, and a password typed into the add form is
-// sent straight to the app and the field is cleared.
-import { newPairingKey, pairingCode, store } from "./api.js";
+// The popup ([S]-adjacent): the toolbar button's small window. It lists the
+// logins for the tab you are on and starts a fill, unlocks and locks the vault,
+// and shows the Google Drive status in one line. It never receives a password:
+// fills run in the service worker, and a password typed into the add form goes
+// straight to the vault and the field is cleared. Everything else (profiles,
+// editing, settings, sync) is on the vault page.
+import { store } from "./api.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -72,95 +74,8 @@ async function renderPending() {
   if (isUpdate) update.textContent = `Update ${candidate.title}`;
 }
 
-async function refresh() {
-  setStatus("Checking the desktop app…");
-  show("not-running", false);
-  show("locked", false);
-  show("unpaired", false);
-  show("pair-code", false);
-  show("pair-hint", false);
-  show("insecure", false);
-  show("ext-setup", false);
-  show("ext-unlock", false);
-  show("ext-sync", false);
-  show("open-vault", false);
-  matches = [];
-  renderMatches();
-
-  const reply = await send("status");
-  if (reply.ok && reply.result.mode === "extension") {
-    show("open-vault", true);
-    if (reply.result.state === "locked") {
-      show("lock", false);
-      await renderExtensionLocked();
-      return;
-    }
-    await renderExtensionSync();
-  }
-  if (!reply.ok) {
-    const code = reply.error ? reply.error.code : "unknown";
-    if (code === "app_not_running") {
-      setStatus("The desktop app is not running.");
-      show("not-running", true);
-    } else {
-      setStatus(`The desktop app answered: ${code}`);
-    }
-    show("lock", false);
-    return;
-  }
-
-  $("lock").hidden = false;
-  if (reply.result.state === "locked") {
-    setStatus(`${reply.result.profile_name} is locked.`);
-    show("locked", true);
-    return;
-  }
-
-  setStatus(`Unlocked: ${reply.result.profile_name}`);
-  const logins = await send("get_logins");
-  if (!logins.ok) {
-    if (logins.error && logins.error.code === "not_paired") {
-      setStatus("Not paired yet.");
-      show("unpaired", true);
-    } else {
-      setStatus(`Could not list logins: ${logins.error.code}`);
-    }
-    return;
-  }
-  pageUrl = logins.tab_url || "";
-  matches = logins.result.logins;
-  renderMatches();
-  if (pageUrl.startsWith("http://")) show("insecure", true);
-  await renderPending();
-}
-
-$("unlock").addEventListener("click", async () => {
-  await send("unlock");
-  setStatus("Bringing the desktop window forward…");
-});
-
-// --- extension-only mode: unlock here, see the sync status -----------------------
-
-async function renderExtensionLocked() {
-  const reply = await send("ext_state", { args: {} });
-  if (!reply.ok) return setStatus("Could not read the vault list.");
-  const { profiles, lastProfileId } = reply.result;
-  if (profiles.length === 0) {
-    setStatus("No vault in this browser yet.");
-    show("ext-setup", true);
-    return;
-  }
-  const select = $("ext-profile");
-  select.replaceChildren(
-    ...profiles.map((p) => Object.assign(document.createElement("option"), { value: p.id, textContent: p.name })),
-  );
-  if (profiles.some((p) => p.id === lastProfileId)) select.value = lastProfileId;
-  setStatus("Locked.");
-  show("ext-unlock", true);
-  $("ext-password").focus();
-}
-
-async function renderExtensionSync() {
+// The Google Drive status of the unlocked profile, in one line.
+async function renderSync() {
   const reply = await send("ext_state", { args: {} });
   if (!reply.ok || !reply.result.unlocked) return;
   const id = reply.result.unlocked.profileId;
@@ -171,46 +86,94 @@ async function renderExtensionSync() {
     : profile && profile.googleEmail
       ? "Not synced yet."
       : "Only on this computer (Google Drive not connected).";
-  if (status && status.localOnly && status.state !== "off") text += " Latest change: only on this computer.";
-  $("ext-sync").textContent = text;
-  show("ext-sync", true);
+  if (status && status.localOnly && status.state !== "off") {
+    text += " Latest change: only on this computer.";
+  }
+  $("sync").textContent = text;
+  show("sync", true);
 }
 
-$("ext-unlock").addEventListener("submit", async (event) => {
+// No vault yet, or locked: say so and offer the matching form.
+async function renderClosed() {
+  const reply = await send("ext_state", { args: {} });
+  if (!reply.ok) return setStatus("Could not read the vault list.");
+  const { profiles, lastProfileId } = reply.result;
+  if (profiles.length === 0) {
+    setStatus("No vault in this browser yet.");
+    show("setup", true);
+    return;
+  }
+  const select = $("profile");
+  select.replaceChildren(
+    ...profiles.map((p) =>
+      Object.assign(document.createElement("option"), { value: p.id, textContent: p.name }),
+    ),
+  );
+  if (profiles.some((p) => p.id === lastProfileId)) select.value = lastProfileId;
+  setStatus("Locked.");
+  show("unlock-form", true);
+  $("password").focus();
+}
+
+async function refresh() {
+  setStatus("Checking the vault…");
+  for (const id of ["setup", "unlock-form", "sync", "insecure", "add", "lock"]) show(id, false);
+  show("open-vault", true);
+  matches = [];
+  renderMatches();
+
+  const reply = await send("status");
+  if (!reply.ok) {
+    setStatus("The vault did not answer. Reload the extension.");
+    return;
+  }
+  if (reply.result.state === "locked") {
+    await renderClosed();
+    return;
+  }
+
+  const name = reply.result.profile_name;
+  show("lock", true);
+  setStatus(`Unlocked: ${name}`);
+  await renderSync();
+  const logins = await send("get_logins");
+  pageUrl = logins.tab_url || "";
+  if (!logins.ok) {
+    const code = logins.error ? logins.error.code : "unknown";
+    if (code === "no_match") show("add", true); // a site with no saved login: add one here
+    else if (code === "no_tab") setStatus(`Unlocked: ${name}. Open a web page to see its logins.`);
+    else setStatus(`Could not list logins: ${code}`);
+    await renderPending();
+    return;
+  }
+  matches = logins.result.logins;
+  renderMatches();
+  show("add", true);
+  if (pageUrl.startsWith("http://")) show("insecure", true);
+  await renderPending();
+}
+
+$("unlock-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  $("ext-unlock-button").disabled = true;
+  $("unlock-button").disabled = true;
   setStatus("Unlocking…");
   const reply = await send("ext_unlock", {
-    args: { profileId: $("ext-profile").value, password: $("ext-password").value },
+    args: { profileId: $("profile").value, password: $("password").value },
   });
-  $("ext-password").value = "";
-  $("ext-unlock-button").disabled = false;
+  $("password").value = "";
+  $("unlock-button").disabled = false;
   if (reply.ok) await refresh();
   else if (reply.error && reply.error.code === "bad_password") setStatus("Wrong master password.");
   else setStatus(`Could not unlock: ${reply.error ? reply.error.code : "unknown"}`);
 });
 
-const openVault = (hash = "") => chrome.tabs.create({ url: chrome.runtime.getURL(`vault.html${hash}`) });
-$("ext-create").addEventListener("click", () => openVault());
-$("open-vault").addEventListener("click", () => openVault());
-$("use-extension").addEventListener("click", () => openVault());
+const openVault = () => chrome.tabs.create({ url: chrome.runtime.getURL("vault.html") });
+$("create").addEventListener("click", openVault);
+$("open-vault").addEventListener("click", openVault);
 
 $("lock").addEventListener("click", async () => {
   await send("lock");
   await refresh();
-});
-
-$("pair").addEventListener("click", async () => {
-  // the key is made here so its code can be shown now: the app asks the user to
-  // compare the two while its own "Pair" button waits for the click
-  const key = newPairingKey();
-  $("pair-code").textContent = await pairingCode(key);
-  show("pair-code", true);
-  show("pair-hint", true);
-  setStatus("Confirm the code in the desktop app…");
-  const reply = await send("pair", { key });
-  if (reply.ok && reply.result.paired) await refresh();
-  else setStatus("Pairing was not confirmed.");
 });
 
 $("add").addEventListener("submit", async (event) => {

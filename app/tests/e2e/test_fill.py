@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from conftest import Bridge
+from conftest import SeededVault
 from playwright.sync_api import BrowserContext, Page
 from support import PASSWORD_LOCAL, fill_button, open_login_page, open_popup, status
 
@@ -20,9 +20,9 @@ def _fill(browser: BrowserContext, page: Page) -> Page:
 
 
 def test_fill_fills_the_visible_pair_and_never_submits(
-    browser: BrowserContext, bridge: Bridge
+    browser: BrowserContext, vault: SeededVault
 ) -> None:
-    url = bridge.url("login.html")
+    url = vault.url("login.html")
     page = open_login_page(browser, url)
     before = set(page.evaluate("() => Object.getOwnPropertyNames(window)"))
     _fill(browser, page)
@@ -36,8 +36,8 @@ def test_fill_fills_the_visible_pair_and_never_submits(
     assert page.evaluate("() => [localStorage.length, sessionStorage.length]") == [0, 0]
 
 
-def test_hostile_fields_are_never_filled(browser: BrowserContext, bridge: Bridge) -> None:
-    page = open_login_page(browser, bridge.url("hostile-fields.html"))
+def test_hostile_fields_are_never_filled(browser: BrowserContext, vault: SeededVault) -> None:
+    page = open_login_page(browser, vault.url("hostile-fields.html"))
     _fill(browser, page)
     assert page.input_value("#username") == "dev@example.com"
     assert page.input_value("#password") == PASSWORD_LOCAL
@@ -45,8 +45,8 @@ def test_hostile_fields_are_never_filled(browser: BrowserContext, bridge: Bridge
         assert page.input_value(hostile) == "", f"{hostile} must stay empty"
 
 
-def test_the_fill_stays_in_the_top_frame(browser: BrowserContext, bridge: Bridge) -> None:
-    page = open_login_page(browser, bridge.url("framed.html"))
+def test_the_fill_stays_in_the_top_frame(browser: BrowserContext, vault: SeededVault) -> None:
+    page = open_login_page(browser, vault.url("framed.html"))
     frame = page.frame_locator("#frame")
     frame.locator("#frame-password").wait_for(state="visible")  # the frame has loaded
     _fill(browser, page)
@@ -56,11 +56,11 @@ def test_the_fill_stays_in_the_top_frame(browser: BrowserContext, bridge: Bridge
 
 
 def test_a_page_that_changed_since_listing_is_never_filled(
-    browser: BrowserContext, bridge: Bridge
+    browser: BrowserContext, vault: SeededVault
 ) -> None:
-    page = open_login_page(browser, bridge.url("login.html"))
+    page = open_login_page(browser, vault.url("login.html"))
     popup = open_popup(browser)
-    page.goto(bridge.url("framed-login.html"))  # the tab moved on
+    page.goto(vault.url("framed-login.html"))  # the tab moved on
     fill_button(popup)
     popup.wait_for_function(
         "() => document.getElementById('status').textContent.includes('page changed')",

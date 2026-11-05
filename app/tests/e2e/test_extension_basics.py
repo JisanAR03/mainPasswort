@@ -1,28 +1,23 @@
-"""M4-01: the shipped manifest, the pinned extension ID, and status/pairing."""
+"""The shipped manifest and config, the pinned extension ID, and the popup's states."""
 
 from __future__ import annotations
 
-import base64
 import json
 from collections.abc import Callable
 
 import pytest
-from conftest import Bridge
-from personal_vault.bridge.pairing import pairing_code
+from conftest import EXT_PASSWORD, SeededVault
 from playwright.sync_api import BrowserContext, Page
 from support import (
     EXTENSION_ID,
     MANIFEST_PATH,
     open_popup,
     status,
-    titles,
-    usernames,
-    wait_for_matches,
 )
 
 pytestmark = pytest.mark.e2e
 
-BridgeFactory = Callable[..., Bridge]
+VaultFactory = Callable[..., SeededVault]
 
 
 def test_shipped_manifest_asks_only_for_what_the_page_features_need() -> None:
@@ -34,14 +29,13 @@ def test_shipped_manifest_asks_only_for_what_the_page_features_need() -> None:
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     web = ["http://*/*", "https://*/*"]
     assert manifest["manifest_version"] == 3
-    # offscreen, alarms and identity are extension-only mode's (EXT-00, approved
-    # by the owner): the vault engine's document, the timers that outlive the
-    # service worker, and Google sign-in
+    # offscreen, alarms and identity: the vault engine's document, the timers
+    # that outlive the service worker, and Google sign-in. No nativeMessaging:
+    # nothing talks to another program.
     assert sorted(manifest["permissions"]) == [
         "activeTab",
         "alarms",
         "identity",
-        "nativeMessaging",
         "offscreen",
         "scripting",
         "storage",
@@ -95,57 +89,32 @@ def test_the_loaded_extension_has_the_pinned_id(control_page: Page) -> None:
     assert control_page.evaluate("() => chrome.runtime.id") == EXTENSION_ID
 
 
-def test_status_reaches_the_desktop_app(browser: BrowserContext, bridge: Bridge) -> None:
-    browser.new_page().goto(bridge.url("login.html"))
+def test_the_popup_shows_the_unlocked_profile(browser: BrowserContext, vault: SeededVault) -> None:
+    browser.new_page().goto(vault.url("login.html"))
     popup = open_popup(browser)
     assert status(popup) == "Unlocked: E2E"
     assert popup.is_visible("#lock")
 
 
-def test_without_the_app_the_popup_says_so(browser: BrowserContext) -> None:
+def test_with_no_vault_the_popup_offers_to_create_one(browser: BrowserContext) -> None:
     popup = open_popup(browser)
-    assert status(popup) == "The desktop app is not running."
-    assert popup.is_visible("#not-running")
+    assert status(popup) == "No vault in this browser yet."
+    assert popup.is_visible("#setup")
+    assert not popup.is_visible("#unlock-form")
 
 
-def test_a_locked_vault_points_at_the_app(
-    browser: BrowserContext, bridge_factory: BridgeFactory
+def test_a_locked_vault_is_unlocked_from_the_popup(
+    browser: BrowserContext, vault_factory: VaultFactory
 ) -> None:
-    bridge_factory(locked=True)
+    vault = vault_factory(locked=True)
+    browser.new_page().goto(vault.url("login.html"))
     popup = open_popup(browser)
-    assert status(popup) == "E2E is locked."
-    assert popup.is_visible("#locked")
-    popup.click("#unlock")
-    assert status(popup) == "Bringing the desktop window forward…"
-
-
-def test_an_unpaired_browser_can_pair_and_then_list(
-    browser: BrowserContext, bridge_factory: BridgeFactory, control_page: Page
-) -> None:
-    # the app holds its answer back for a moment, as its dialog does while it
-    # waits for the click, so the popup's code can be read while it waits
-    bridge = bridge_factory(unpaired=True, pair_delay_ms=2000)
-    browser.new_page().goto(bridge.url("login.html"))
-    popup = open_popup(browser)
-    assert status(popup) == "Not paired yet."
-    assert popup.is_visible("#unpaired")
-    popup.click("#pair")
-    popup.wait_for_selector("#pair-code", state="visible", timeout=30_000)
-    shown = popup.inner_text("#pair-code")
-    assert len(shown) == 6
-
+    assert status(popup) == "Locked."
+    assert popup.is_visible("#unlock-form")
+    popup.fill("#password", EXT_PASSWORD)
+    popup.click("#unlock-button")
     popup.wait_for_function(
-        "() => document.getElementById('status').textContent.startsWith('Unlocked')",
-        timeout=30_000,
+        "() => document.getElementById('status').textContent === 'Unlocked: E2E'",
+        timeout=60_000,
     )
-    wait_for_matches(popup)
-    assert titles(popup) == ["Local Dev"]
-    assert usernames(popup) == ["dev@example.com"]
-    assert not popup.is_visible("#pair-code"), "the code goes once the browser is paired"
-
-    # the key the browser made and stored, run through the app's own derivation:
-    # the two sides must show the same code, or pairing confirms nothing
-    stored = control_page.evaluate(
-        "async () => (await chrome.storage.local.get('pairing_key')).pairing_key"
-    )
-    assert shown == pairing_code(base64.b64decode(stored))
+    assert popup.is_visible("#lock")

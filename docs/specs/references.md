@@ -63,3 +63,16 @@ spikes.
 
 - Keep a Changelog: <https://keepachangelog.com/en/1.1.0/>
 - Conventional Commits: <https://www.conventionalcommits.org/>
+
+## Added for the extension-only product (2026-11)
+
+| Name | Used for | Link |
+| --- | --- | --- |
+| kdbxweb 2.1.1 (MIT) | Reading and writing KDBX 4 in the browser; vendored and pinned | <https://github.com/keeweb/kdbxweb> |
+| hash-wasm 4.12.0 (MIT) | Argon2id and MD5 in WebAssembly; vendored and pinned | <https://github.com/Daninet/hash-wasm> |
+| Chrome `chrome.storage.session` | Where the unlock record lives; cleared when the browser closes or the extension is reloaded | <https://developer.chrome.com/docs/extensions/reference/api/storage> |
+| Chrome offscreen documents | The vault engine's document (`DOM_PARSER`, no lifetime limit) | <https://developer.chrome.com/docs/extensions/reference/api/offscreen> |
+| Chrome `chrome.identity.launchWebAuthFlow` | Google sign-in without a refresh token | <https://developer.chrome.com/docs/extensions/reference/api/identity> |
+| Playwright for Python | Real-browser tests: Chromium, installed Chrome, installed Brave | <https://playwright.dev/python/> |
+| `@xmldom/xmldom` advisories | Why it is not shipped: every 0.7.x release has unpatched high-severity advisories | <https://github.com/advisories?query=xmldom> |
+

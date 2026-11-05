@@ -1,6 +1,6 @@
 # ADR-003 Browser integration: native messaging to a local socket
 
-Status: Accepted
+Status: Superseded by ADR-012
 Date: 2026-10-15
 
 ## Context

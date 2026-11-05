@@ -41,9 +41,9 @@ function notice(text) {
 const failed = (reply) => notice(ERRORS[reply.error && reply.error.code] || `Something went wrong (${reply.error ? reply.error.code : "unknown"}).`);
 
 function show(view) {
-  for (const id of ["view-mode", "view-create", "view-unlock", "view-vault"]) $(id).hidden = id !== view;
+  for (const id of ["view-create", "view-unlock", "view-vault"]) $(id).hidden = id !== view;
   // opening a vault from Google Drive is offered whenever nothing is unlocked
-  $("view-drive").hidden = !(state && state.mode === "extension" && !state.unlocked);
+  $("view-drive").hidden = !(state && !state.unlocked);
   if (!$("view-drive").hidden) {
     $("drive-client").value = state.settings.googleClientId;
     $("drive-client-row").hidden = Boolean(state.settings.googleClientId);
@@ -62,10 +62,6 @@ async function refresh() {
   if (!reply.ok) return failed(reply);
   state = reply.result;
   $("lock").hidden = !state.unlocked;
-  if (state.mode !== "extension") {
-    $("who").textContent = "Desktop app mode";
-    return show("view-mode");
-  }
   if (!state.unlocked) {
     clearForms();
     $("who").textContent = "Locked";
@@ -195,20 +191,6 @@ function formEntry() {
 }
 
 // --- events ----------------------------------------------------------------------
-
-$("use-extension").addEventListener("click", async () => {
-  const reply = await send("ext_set_mode", { mode: "extension" });
-  if (!reply.ok) return failed(reply);
-  notice("");
-  await refresh();
-});
-
-$("use-desktop").addEventListener("click", async () => {
-  if (!confirm("Lock this vault and switch back to the desktop app? Vaults stay in this browser.")) return;
-  const reply = await send("ext_set_mode", { mode: "desktop" });
-  if (!reply.ok) return failed(reply);
-  await refresh();
-});
 
 $("create-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -412,7 +394,7 @@ $("drive-form").addEventListener("submit", async (event) => {
 // Locking anywhere (popup, shortcut, expiry) and sync progress show up here.
 chrome.storage.onChanged.addListener((changes, area) => {
   const relevant = Object.keys(changes).some(
-    (key) => key === "unlocked" || key === "profiles" || key === "mode" || key.startsWith("sync_status:"),
+    (key) => key === "unlocked" || key === "profiles" || key.startsWith("sync_status:"),
   );
   if (!relevant) return;
   if (area === "session" && changes.unlocked && !changes.unlocked.newValue) clearForms();

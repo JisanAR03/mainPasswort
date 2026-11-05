@@ -1,5 +1,5 @@
-"""End-to-end fixtures: a real browser, the unpacked extension, the real native
-host and a real bridge process in front of a weak test vault.
+"""End-to-end fixtures: a real browser with the unpacked extension, running in
+extension-only mode against a fake Google.
 
 The browser is Playwright's Chromium unless ``PV_E2E_BROWSER`` names another:
 ``chrome`` (the installed Google Chrome, which no longer takes --load-extension,
@@ -7,23 +7,18 @@ so the extension is installed over the DevTools protocol) or ``brave`` (the
 installed Brave; ``PV_BRAVE_PATH`` overrides where it is looked for). CI runs
 Chromium; the owner runs the other two locally.
 
-The extension under test is a copy of extension/ whose one change is the native
-host name it connects to: the copy asks for ``com.personalvault.e2e``, which
-these fixtures register for the test bridge. The real name stays registered for
-the installed app, so a run in the browser you use every day can never reach
-your real vault.
+The extension under test is a copy of extension/ whose only changes are in
+config.js: weak key-derivation settings so vaults open in milliseconds, Google's
+endpoints pointed at fake_google.py, and short timers — the way weak KDF
+settings exist only in test fixtures. test_extension_basics asserts that the
+file that ships holds the real values.
 """
 
 from __future__ import annotations
 
-import base64
-import json
 import os
 import shutil
-import subprocess
-import sys
 import threading
-import uuid
 from collections.abc import Callable, Iterator
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -31,17 +26,9 @@ from pathlib import Path
 
 import pytest
 from fake_google import FakeGoogle
-from fixtures.weak_vault import WEAK_PASSWORD, build_weak_vault, make_login
-from personal_vault.bridge.pairing import PAIRING_ENTRY
-from personal_vault.core.models import SecretStr
-from personal_vault.core.vault import VaultSession
 from playwright.sync_api import BrowserContext, Page, Playwright, sync_playwright
 from support import (
-    BRIDGE_APP,
-    E2E_HOST_NAME,
     EXTENSION_DIR,
-    EXTENSION_ID,
-    HOST_NAME,
     PASSWORD_ALIAS,
     PASSWORD_INSECURE,
     PASSWORD_LOCAL,
@@ -50,23 +37,12 @@ from support import (
     TEST_PAGES,
 )
 
-PAIRING_KEY = base64.b64encode(bytes(range(32))).decode()
 E2E_BROWSER = os.environ.get("PV_E2E_BROWSER", "chromium")
 BRAVE_PATHS = {
     "nt": r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
     "posix": "/usr/bin/brave-browser",
 }
-# where each browser reads its user-level native hosts from: a registry key on
-# Windows, a folder under ~/.config on Linux. Brave on Windows reads Chrome's
-# key, not one of its own: a host registered only under
-# Software\BraveSoftware\Brave-Browser is "not found" (checked with Brave 1.97,
-# 2026-10-16) — the installer's Chrome key is what makes Brave work.
-_WINDOWS_HOST_KEYS = {
-    "chromium": r"Software\Chromium\NativeMessagingHosts",
-    "chrome": r"Software\Google\Chrome\NativeMessagingHosts",
-    "brave": r"Software\Google\Chrome\NativeMessagingHosts",
-}
-_POSIX_HOST_DIRS = ("chromium", "google-chrome", "BraveSoftware/Brave-Browser")
+EXT_PASSWORD = "an extension-only test passphrase"
 
 
 class _QuietHandler(SimpleHTTPRequestHandler):
@@ -83,105 +59,6 @@ def page_server() -> Iterator[str]:
     thread.start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
     server.shutdown()
-
-
-def _windows_key() -> str:
-    return rf"{_WINDOWS_HOST_KEYS[E2E_BROWSER]}\{E2E_HOST_NAME}"
-
-
-def _posix_manifest_paths(profile_dir: Path) -> list[Path]:
-    """Everywhere the Linux browser may look for a user-level host.
-
-    Playwright's Linux Chromium build is branded Chrome for Testing, which
-    reads Chrome's directory rather than Chromium's; Brave reads its own; a
-    browser started with ``--user-data-dir`` also looks inside that directory.
-    Writing all of them is cheaper than guessing which one this build uses.
-    """
-    brands = [
-        Path.home() / ".config" / brand / "NativeMessagingHosts" for brand in _POSIX_HOST_DIRS
-    ]
-    return [
-        *(brand / f"{E2E_HOST_NAME}.json" for brand in brands),
-        profile_dir / "NativeMessagingHosts" / f"{E2E_HOST_NAME}.json",
-    ]
-
-
-def _launcher_text(socket_name: str) -> tuple[str, str]:
-    command = f'"{sys.executable}" -m personal_vault.host.pm_host'
-    if os.name == "nt":
-        return (
-            "launcher.bat",
-            f"@echo off\r\nset PERSONAL_VAULT_SOCKET={socket_name}\r\n{command}\r\n",
-        )
-    return "launcher.sh", f"#!/bin/sh\nexport PERSONAL_VAULT_SOCKET={socket_name}\nexec {command}\n"
-
-
-@pytest.fixture(scope="session")
-def chromium_profile(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """The browser's user-data-dir, so the host can register inside it too."""
-    return tmp_path_factory.mktemp("chromium-profile")
-
-
-@pytest.fixture(scope="session")
-def host_socket(tmp_path_factory: pytest.TempPathFactory, chromium_profile: Path) -> Iterator[str]:
-    """Register the e2e native host for the browser under test and hand back
-    the socket name its launcher points at."""
-    name = f"pv-e2e-{uuid.uuid4().hex}"
-    home = tmp_path_factory.mktemp("native-host")
-    filename, text = _launcher_text(name)
-    launcher = home / filename
-    launcher.write_text(text, encoding="utf-8")
-    if os.name != "nt":
-        launcher.chmod(0o755)
-    manifest = home / f"{HOST_NAME}.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "name": E2E_HOST_NAME,
-                "description": "Personal Vault e2e host",
-                "path": str(launcher),
-                "type": "stdio",
-                "allowed_origins": [f"chrome-extension://{EXTENSION_ID}/"],
-            }
-        ),
-        encoding="utf-8",
-    )
-    if os.name == "nt":
-        import winreg
-
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _windows_key()) as key:
-            winreg.SetValueEx(key, None, 0, winreg.REG_SZ, str(manifest))
-    else:
-        for target in _posix_manifest_paths(chromium_profile):
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(manifest.read_text(encoding="utf-8"), encoding="utf-8")
-    yield name
-    if os.name == "nt":
-        import winreg
-
-        try:
-            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, _windows_key())
-        except FileNotFoundError:
-            pass
-    else:
-        for target in _posix_manifest_paths(chromium_profile):
-            target.unlink(missing_ok=True)
-
-
-@pytest.fixture(scope="session")
-def test_extension(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A copy of the extension that connects to the e2e host, not the real one."""
-    target = tmp_path_factory.mktemp("extension") / "extension"
-    shutil.copytree(
-        EXTENSION_DIR,
-        target,
-        ignore=shutil.ignore_patterns("key.pem", "native-host", "test-pages"),
-    )
-    api = target / "api.js"
-    text = api.read_text(encoding="utf-8")
-    assert f'"{HOST_NAME}"' in text, "api.js no longer names the host the way this copy expects"
-    api.write_text(text.replace(f'"{HOST_NAME}"', f'"{E2E_HOST_NAME}"'), encoding="utf-8")
-    return target
 
 
 def _launch(playwright: Playwright, profile: Path, extension: Path) -> BrowserContext:
@@ -225,200 +102,9 @@ def _launch(playwright: Playwright, profile: Path, extension: Path) -> BrowserCo
 
 @pytest.fixture(scope="session")
 def playwright_instance() -> Iterator[Playwright]:
-    """One Playwright for the run: the sync API allows one per thread, and the
-    desktop-mode and extension-only browsers both need it."""
+    """One Playwright for the run: the sync API allows one per thread."""
     with sync_playwright() as playwright:
         yield playwright
-
-
-@pytest.fixture(scope="session")
-def browser(
-    playwright_instance: Playwright,
-    test_extension: Path,
-    host_socket: str,
-    chromium_profile: Path,
-) -> Iterator[BrowserContext]:
-    """One headless browser for the whole e2e run, extension loaded and the
-    pairing key already in extension storage."""
-    context = _launch(playwright_instance, chromium_profile, test_extension)
-    seed = context.new_page()
-    seed.goto(POPUP_URL)
-    seed.evaluate("(key) => chrome.storage.local.set({ pairing_key: key })", PAIRING_KEY)
-    seed.close()
-    yield context
-    context.close()
-
-
-@pytest.fixture(scope="session")
-def control_page(browser: BrowserContext) -> Page:
-    """An extension page kept around to read and reset extension storage."""
-    page = browser.new_page()
-    page.goto(POPUP_URL)
-    return page
-
-
-@pytest.fixture(autouse=True)
-def _clean_slate(control_page: Page, browser: BrowserContext) -> Iterator[None]:
-    """Every test starts from the same extension state: the key the seeded
-    vaults are paired with (a pairing test changes it), saving offered, no
-    "never" sites, no save candidate — and the tabs a test opens are closed
-    again."""
-    before = {id(page) for page in browser.pages}
-    control_page.evaluate(
-        "async (key) => {"
-        "  await chrome.storage.session.clear();"
-        "  await chrome.storage.local.remove(['offer_to_save', 'never_save']);"
-        "  await chrome.storage.local.set({ pairing_key: key });"
-        "  await chrome.action.setBadgeText({ text: '' });"
-        "}",
-        PAIRING_KEY,
-    )
-    yield
-    for page in browser.pages:
-        if id(page) not in before:
-            page.close()
-
-
-class Bridge:
-    """A running bridge process over one test vault."""
-
-    def __init__(
-        self,
-        process: subprocess.Popen[str],
-        vault_path: Path,
-        backups_dir: Path,
-        port: int,
-        unlock_marker: Path,
-    ) -> None:
-        self.process = process
-        self.vault_path = vault_path
-        self.backups_dir = backups_dir
-        self.port = port
-        self.unlock_marker = unlock_marker
-
-    def url(self, path: str, host: str = "127.0.0.1") -> str:
-        return f"http://{host}:{self.port}/{path}"
-
-    def unlock_requests(self) -> int:
-        """How many times the extension asked the app to show its unlock window."""
-        if not self.unlock_marker.exists():
-            return 0
-        return len(self.unlock_marker.read_text(encoding="utf-8").splitlines())
-
-    def logins(self) -> dict[str, str]:
-        """title -> password, read back from the vault file on disk."""
-        session = VaultSession.open(self.vault_path, WEAK_PASSWORD, self.backups_dir)
-        try:
-            return {
-                summary.title: session.get(summary.id).password.reveal()
-                for summary in session.list_logins()
-            }
-        finally:
-            session.close()
-
-
-def _seed_entries(vault_path: Path, backups_dir: Path, port: int, pairing_key: str | None) -> None:
-    session = VaultSession.open(vault_path, WEAK_PASSWORD, backups_dir)
-    try:
-        session.add(
-            make_login(
-                title="Local Dev",
-                username="dev@example.com",
-                password=SecretStr(PASSWORD_LOCAL),
-                urls=[f"http://127.0.0.1:{port}/login.html"],
-            )
-        )
-        session.add(
-            make_login(
-                title="Local Dev Alias",
-                username="alias@example.com",
-                password=SecretStr(PASSWORD_ALIAS),
-                urls=[f"http://localhost:{port}/login.html"],
-            )
-        )
-        session.add(
-            make_login(
-                title="Secure Only",
-                username="secure@example.com",
-                password=SecretStr(PASSWORD_SECURE),
-                urls=[f"https://127.0.0.1:{port}/login.html"],
-            )
-        )
-        session.add(
-            make_login(
-                title="Plain HTTP Site",
-                username="plain@example.com",
-                password=SecretStr(PASSWORD_INSECURE),
-                urls=[f"http://insecure.test:{port}/login.html"],
-            )
-        )
-        if pairing_key is not None:
-            session.set_app_value(PAIRING_ENTRY, pairing_key)
-        session.save()
-    finally:
-        session.close()
-
-
-@pytest.fixture
-def bridge_factory(
-    tmp_path: Path, page_server: str, host_socket: str
-) -> Iterator[Callable[..., Bridge]]:
-    """Builds (and cleans up) bridge processes over fresh seeded vaults."""
-    processes: list[subprocess.Popen[str]] = []
-    port = int(page_server.rsplit(":", 1)[1])
-
-    def make(*, locked: bool = False, unpaired: bool = False, pair_delay_ms: int = 0) -> Bridge:
-        vault_path = build_weak_vault(tmp_path / f"vault-{uuid.uuid4().hex}.kdbx")
-        backups_dir = tmp_path / "backups"
-        unlock_marker = tmp_path / f"unlock-{uuid.uuid4().hex}.log"
-        _seed_entries(vault_path, backups_dir, port, None if unpaired else PAIRING_KEY)
-        env = {
-            **os.environ,
-            "PV_VAULT_PATH": str(vault_path),
-            "PV_VAULT_PASSWORD": WEAK_PASSWORD,
-            "PV_BRIDGE_SOCKET": host_socket,
-            "PV_BACKUPS_DIR": str(backups_dir),
-            "PV_UNLOCK_MARKER": str(unlock_marker),
-        }
-        if locked:
-            env["PV_START_LOCKED"] = "1"
-        if pair_delay_ms:
-            env["PV_PAIR_DELAY_MS"] = str(pair_delay_ms)
-        process = subprocess.Popen(
-            [sys.executable, str(BRIDGE_APP)],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        processes.append(process)
-        assert process.stdout is not None
-        line = process.stdout.readline().strip()
-        assert line == "READY", f"bridge did not start: {line!r}"
-        return Bridge(process, vault_path, backups_dir, port, unlock_marker)
-
-    yield make
-    for process in processes:
-        process.terminate()
-        process.wait(timeout=10)
-
-
-@pytest.fixture
-def bridge(bridge_factory: Callable[..., Bridge]) -> Bridge:
-    return bridge_factory()
-
-
-# --- extension-only mode -----------------------------------------------------------
-#
-# A second browser, with a copy of the extension that (1) connects to a native
-# host name nobody registers, so no desktop app can answer even by accident,
-# (2) uses the fake Google in fake_google.py, and (3) weak KDF settings and
-# short timers — config.js is the one file the copy rewrites, the way weak KDF
-# settings exist only in test fixtures. test_extension_basics asserts the
-# shipped values.
-
-EXT_ABSENT_HOST = "com.personalvault.absent"
-EXT_PASSWORD = "an extension-only test passphrase"
 
 
 def _rewrite(path: Path, replacements: dict[str, str]) -> None:
@@ -438,13 +124,14 @@ def fake_google() -> Iterator[FakeGoogle]:
 
 @pytest.fixture(scope="session")
 def ext_extension(tmp_path_factory: pytest.TempPathFactory, fake_google: FakeGoogle) -> Path:
+    """A copy of the extension with weak KDF settings, the fake Google and short
+    timers — config.js is the one file it rewrites."""
     target = tmp_path_factory.mktemp("ext-extension") / "extension"
     shutil.copytree(
         EXTENSION_DIR,
         target,
-        ignore=shutil.ignore_patterns("key.pem", "native-host", "test-pages"),
+        ignore=shutil.ignore_patterns("key.pem", "test-pages"),
     )
-    _rewrite(target / "api.js", {f'"{HOST_NAME}"': f'"{EXT_ABSENT_HOST}"'})
     base = fake_google.base
     _rewrite(
         target / "config.js",
@@ -454,7 +141,9 @@ def ext_extension(tmp_path_factory: pytest.TempPathFactory, fake_google: FakeGoo
             "KDF_TARGET_MS = 1000;": "KDF_TARGET_MS = 1;",
             "KDF_MIN_ITERATIONS = 2;": "KDF_MIN_ITERATIONS = 1;",
             '"https://www.googleapis.com/drive/v3/files"': f'"{base}/drive/v3/files"',
-            '"https://www.googleapis.com/upload/drive/v3/files"': f'"{base}/upload/drive/v3/files"',
+            '"https://www.googleapis.com/upload/drive/v3/files"': (
+                f'"{base}/upload/drive/v3/files"'
+            ),
             '"https://www.googleapis.com/drive/v3/about"': f'"{base}/drive/v3/about"',
             '"https://accounts.google.com/o/oauth2/v2/auth"': f'"{base}/auth"',
             "UPLOAD_QUIET_MS = 10 * 1000;": "UPLOAD_QUIET_MS = 300;",
@@ -471,25 +160,32 @@ def ext_profile_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("ext-profile")
 
 
-def _seed_extension_mode(context: BrowserContext) -> None:
+def _seed_settings(context: BrowserContext) -> None:
     seed = context.new_page()
     seed.goto(POPUP_URL)
     seed.evaluate(
-        "() => chrome.storage.local.set({"
-        "  mode: 'extension', settings: { googleClientId: 'fake-client-id' }"
-        "})"
+        "() => chrome.storage.local.set({ settings: { googleClientId: 'fake-client-id' } })"
     )
     seed.close()
 
 
 @pytest.fixture(scope="session")
-def ext_browser(
+def browser(
     playwright_instance: Playwright, ext_extension: Path, ext_profile_dir: Path
 ) -> Iterator[BrowserContext]:
+    """One headless browser for the whole e2e run, the extension loaded."""
     context = _launch(playwright_instance, ext_profile_dir, ext_extension)
-    _seed_extension_mode(context)
+    _seed_settings(context)
     yield context
     context.close()
+
+
+@pytest.fixture(scope="session")
+def control_page(browser: BrowserContext) -> Page:
+    """An extension page kept around to read and reset extension storage."""
+    page = browser.new_page()
+    page.goto(POPUP_URL)
+    return page
 
 
 _DUMP_STORAGE = """async () => {
@@ -527,9 +223,8 @@ _RESET = """async () => {
   if (docs.length) await chrome.offscreen.closeDocument();
   await chrome.storage.session.clear();
   await chrome.storage.local.clear();
-  await chrome.storage.local.set({
-    mode: 'extension', settings: { googleClientId: 'fake-client-id' }
-  });
+  await chrome.storage.local.set({ settings: { googleClientId: 'fake-client-id' } });
+  await chrome.action.setBadgeText({ text: '' });
   await new Promise((ok, no) => {
     const r = indexedDB.deleteDatabase('personal-vault');
     r.onsuccess = ok;
@@ -540,8 +235,24 @@ _RESET = """async () => {
 }"""
 
 
+@pytest.fixture(autouse=True)
+def _clean_slate(
+    control_page: Page, browser: BrowserContext, fake_google: FakeGoogle
+) -> Iterator[None]:
+    """Every test starts from the same state: no profiles, no vaults, no sync
+    state, nothing unlocked, saving offered, no "never" sites, no save
+    candidate, an empty fake Drive — and the tabs a test opens are closed again."""
+    fake_google.reset()
+    control_page.evaluate(_RESET)
+    before = {id(page) for page in browser.pages}
+    yield
+    for page in browser.pages:
+        if id(page) not in before:
+            page.close()
+
+
 class Ext:
-    """Drives extension-only mode the way its own pages do."""
+    """Drives the extension the way its own pages do."""
 
     def __init__(self, browser: BrowserContext, control: Page, google: FakeGoogle) -> None:
         self.browser = browser
@@ -599,16 +310,60 @@ class Ext:
 
 
 @pytest.fixture
-def ext(ext_browser: BrowserContext, fake_google: FakeGoogle) -> Iterator[Ext]:
-    """A clean extension-only state for each test: no profiles, no vaults, no
-    sync state, nothing unlocked, an empty fake Drive."""
-    fake_google.reset()
-    control = ext_browser.new_page()
-    control.goto(POPUP_URL)
-    control.evaluate(_RESET)
-    before = {id(page) for page in ext_browser.pages}
-    yield Ext(ext_browser, control, fake_google)
-    for page in ext_browser.pages:
-        if id(page) not in before:
-            page.close()
-    control.close()
+def ext(browser: BrowserContext, control_page: Page, fake_google: FakeGoogle) -> Ext:
+    return Ext(browser, control_page, fake_google)
+
+
+class SeededVault:
+    """A profile in the extension's own vault, seeded with the logins the e2e
+    pages use. The page server's port is part of every address, so the entries
+    always match the test pages."""
+
+    def __init__(self, ext: Ext, port: int, profile_id: str) -> None:
+        self.ext = ext
+        self.port = port
+        self.profile_id = profile_id
+
+    def url(self, path: str, host: str = "127.0.0.1") -> str:
+        return f"http://{host}:{self.port}/{path}"
+
+    def logins(self) -> dict[str, str]:
+        """title -> password, read back from the unlocked vault."""
+        entries = self.ext.ok("ext_list", {"query": ""})["entries"]
+        return {
+            entry["title"]: self.ext.ok("ext_get", {"entryId": entry["id"]})["entry"]["password"]
+            for entry in entries
+        }
+
+
+@pytest.fixture
+def vault_factory(ext: Ext, page_server: str) -> Callable[..., SeededVault]:
+    """Builds the seeded vault; ``locked=True`` leaves it locked."""
+    port = int(page_server.rsplit(":", 1)[1])
+
+    def make(*, locked: bool = False) -> SeededVault:
+        profile = ext.create_profile("E2E")
+        for title, username, password, address in (
+            ("Local Dev", "dev@example.com", PASSWORD_LOCAL, f"http://127.0.0.1:{port}"),
+            ("Local Dev Alias", "alias@example.com", PASSWORD_ALIAS, f"http://localhost:{port}"),
+            ("Secure Only", "secure@example.com", PASSWORD_SECURE, f"https://127.0.0.1:{port}"),
+            (
+                "Plain HTTP Site",
+                "plain@example.com",
+                PASSWORD_INSECURE,
+                f"http://insecure.test:{port}",
+            ),
+        ):
+            ext.add_login(
+                title=title, username=username, password=password, urls=[f"{address}/login.html"]
+            )
+        if locked:
+            ext.ok("ext_lock")
+        return SeededVault(ext, port, profile)
+
+    return make
+
+
+@pytest.fixture
+def vault(vault_factory: Callable[..., SeededVault]) -> SeededVault:
+    return vault_factory()

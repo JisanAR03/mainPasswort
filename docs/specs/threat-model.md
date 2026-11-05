@@ -1,73 +1,76 @@
 # Threat model and security boundaries
 
-> Source: design pack v0.1, section 5. Status: accepted at gate G0 (2026-10-15).
+> Rewritten 2026-11-05 for the extension-only product (ADR-012, ADR-013). The earlier model,
+> which kept the master password and the decrypted vault out of the browser, is in the git
+> history; its invariants I4 to I8 and I10 were about the desktop app and its bridge.
 
-The app protects vault files at rest (on disk, in backups and on Google Drive) and limits what
-a web page can extract. It cannot protect you from malware running as your OS user, from a
-compromised operating system, or from a weak master password. The README states this on its
-first page.
+The product protects vault files at rest (browser storage, backups, Google Drive) and limits what a
+web page can extract. It **cannot** protect you from malware running as your OS user, a
+compromised browser, a malicious build of this extension, or a weak master password. The README
+says so on its first page.
 
 ## What we protect
 
-- The master password
-- The decrypted vault contents
-- The derived key
-- Each profile's OAuth refresh token
-- The backups
+The master password, the decrypted vault, the key derived from the master password (kept as
+`SHA-256(password)` while unlocked), the Google access token, and the encrypted vaults and
+backups.
 
 ## Trust boundaries
 
 | ID | Boundary | Assumption |
 | --- | --- | --- |
-| B1 | Disk | Anything written to disk is assumed readable by an attacker later (stolen laptop, leaked backup). |
-| B2 | Google Drive | Google, or anyone who takes over your Google account, can read, delete or roll back files. |
-| B3 | Web page | Every page is hostile. It controls the DOM, the iframes, and what fields look like. |
-| B4 | Browser → native host → app | Another extension or local process may try to talk to the host or the socket. |
-| B5 | OS user | The OS trusts everything running as you, so it is outside what the app can defend. |
+| B1 | Disk and browser profile | Anything written there (IndexedDB, `storage.local`) is readable by an attacker later: stolen laptop, leaked profile. Only encrypted data goes there. |
+| B2 | Google Drive | Google, or anyone who takes over the Google account, can read, delete or roll back files. |
+| B3 | Web page | Every page is hostile: it controls the DOM, iframes and what fields look like. |
+| B4 | Other extensions and programs | May try to message this extension. It has no `externally_connectable`, and every message is accepted by the browser-reported sender, never by what it claims. |
+| B5 | OS user and the browser itself | Everything running as you, and the browser, can see browser memory. Outside what the product can defend. |
+| B6 | The extension's own code | Whoever controls the code that is loaded controls the vault: it is loaded unpacked from the repository the owner reviews. |
 
 ## Threats and mitigations
 
 | Threat | In scope | Mitigation | What remains |
 | --- | --- | --- | --- |
-| Vault file stolen from disk, backup or Drive | Yes | KDBX 4, Argon2id at 128 MiB, ChaCha20 or AES-256 with HMAC | Offline guessing works against weak master passwords |
-| Drive deletes, corrupts or rolls back a file | Yes | The local file is primary; local backups; sync remembers the last version it saw and refuses to go backwards silently | None, if local backups exist |
-| Malicious website | Yes | Click-to-fill only, top frame only, the app re-checks the hostname, no vault data in the page before the click | A page can read a password after it is filled (true of every manager) |
-| Another extension or local program calls the host or socket | Partly | The host manifest's `allowed_origins` lists only our extension ID; only your user can read the socket; every request must carry a pairing key stored in the vault; there is no "list everything" message | Malware running as you can read the pairing key |
-| Malware, keylogger, or memory or clipboard reader running as you | No | Short secret lifetimes, clipboard auto-clear | Full compromise; documented |
-| Another person on the same OS account | No | Use separate OS accounts | Documented |
-| Unattended unlocked computer | Yes | Idle lock (default 5 minutes), lock on sleep and screen lock, passwords hidden by default | The window before the timer fires |
-| Forgotten master password | Yes, as recovery | No backdoor by design; a printed emergency sheet stored offline | The vault cannot be recovered without the password |
-| Corrupted file, power loss mid-save, bad sync | Yes | Atomic write with read-back check, rotating verified backups, Drive revisions | None, if one backup is good |
-| Malicious or compromised dependency | Yes | Few dependencies, a hash-pinned lock file, pip-audit in CI, no npm packages in the extension | Unknown zero-days |
-| AI-generated code with a subtle security bug | Yes | The owner reviews security-sensitive files; invariant tests run on every commit | Bugs the tests do not cover, hence an outside review before real use |
+| Vault file stolen from browser storage, a backup or Drive | Yes | KDBX 4, Argon2id at 128 MiB, AES-256 with HMAC | Offline guessing works against weak master passwords |
+| Drive deletes, corrupts or rolls back the file | Yes | The browser copy is primary; 20 backups; sync refuses to go backwards silently | None, if a backup or an export exists |
+| Malicious website | Yes | Fill only after a click in an extension-origin frame, top frame only, visible fields only, the engine re-matches the URL, no vault data in the page before the click | A page can read a password after it is filled (true of every manager) |
+| Another extension or program messages this one | Yes | Sender checks by `MessageSender`; one-time tokens for frames; the engine answers only the service worker | Malware with debugger access to the browser reads anything |
+| A malicious or compromised build of this extension | Yes | Loaded unpacked from the reviewed repository; vendored libraries pinned by hash and checked in CI; `[S]` files need the owner's review | Whoever controls the loaded code controls the vault |
+| Malicious or compromised dependency | Yes | Two libraries only, vendored byte for byte; `@xmldom/xmldom` (vulnerable) is not shipped; no npm at all | Unknown zero-days |
+| Browser compromise, memory or clipboard reader, keylogger | No | Short secret lifetimes, clipboard cleared after 30 s | Full compromise; documented |
+| Unattended unlocked browser | Yes | Six-hour expiry, Lock button and shortcut, optional lock when the screen locks | Up to six hours of exposure |
+| Uninstalling or clearing extension data deletes the vaults | Yes | Drive sync, encrypted export | An unsynced, unexported vault is gone |
+| Forgotten master password | Yes, as recovery | No backdoor by design | The vault cannot be opened without it |
+| kdbxweb corrupts or mis-writes a vault | Yes | Read-back check before every replace, 20 backups, KeePassXC and pykeepass open the output in every test run | Bugs the tests do not cover |
+| Corrupted file, power loss mid-save, bad sync | Yes | One IndexedDB transaction per replace, verified before it, Drive revisions | None, if one backup is good |
 
 ## Security invariants
 
-Each invariant gets an automated test, starting in the milestone where it first applies.
-Several tests use a canary password (`CANARY-<random>`) and then search logs, temp folders,
-crash output and uploaded bytes for it.
+Each has an automated test. Tests of the extension run in a real browser (`app/tests/e2e/`).
 
-| ID | Invariant | First tested |
+| ID | Invariant | Where tested |
 | --- | --- | --- |
-| I1 | The app never writes a plaintext secret to disk. | M1 |
-| I2 | Logs, exceptions and tracebacks never contain entry fields or the master password. | M1 |
-| I3 | A save interrupted at any point leaves either the old file or the new file, and it decrypts. | M1 |
-| I4 | The bridge never returns a password for an entry whose hostname does not match the requesting tab. | M3 |
-| I5 | A locked vault answers every bridge request with `locked` and nothing else. | M3 |
-| I6 | Sync never uploads over a remote version it has not seen. | M5 |
-| I7 | Sync never adopts a downloaded file until it decrypts with the current key. | M5 |
-| I8 | Plaintext export requires the master password again and an explicit confirmation; the default export is encrypted. | M2 |
-| I9 | The master password never leaves the desktop process: not to the extension, not to Drive, not to disk. | — |
-| I10 | Drive receives only bytes whose SHA-256 equals a file that storage has verified. | M5 |
+| I1 | The browser never stores a plaintext secret: IndexedDB, `storage.local` and `storage.session` hold only encrypted bytes, names and bookkeeping (the password hash in `storage.session` is the one exception, I11). | `test_a8_no_plaintext_secret_in_any_storage`; `security/test_invariants.py` for the reference vault |
+| I2 | No log, error or message carries an entry field, the master password, a key or a token. | `scripts/check_no_console.py` (no console call at all); error replies carry a code only |
+| I3 | A weak key-derivation setting exists only in test fixtures; the shipped extension refuses less than 64 MiB. | `test_shipped_config_is_the_real_one`; `security/test_invariants.py` |
+| I4 | A password is never returned for an entry whose URL does not match the requesting tab. | the engine's `secret` op; menu and fill tests with look-alike hosts |
+| I5 | A locked vault answers every vault request with `locked` (or `no_vault`) and nothing else. | `test_a2_lock_ends_it_immediately_and_leaves_no_key` |
+| I6 | Sync never uploads over a Drive copy it has not seen; a first link and a missing file ask instead of acting. | `test_a7_a_write_from_another_device_is_a_conflict_never_an_overwrite`, `test_i6_a_first_link_never_overwrites_what_it_finds`, `test_a7_a_trashed_file_asks_instead_of_recreating` |
+| I7 | A downloaded file is never adopted until it decrypts with this vault's key. | `test_i7_a_download_that_does_not_open_is_never_adopted` |
+| I9' | The master password is typed only into extension pages and is never stored, sent to a page, a content script, Drive or disk. | `test_a8_no_plaintext_secret_in_any_storage` (the session record holds the hash, not the password) |
+| I10 | Drive receives exactly the bytes the engine verified and stored. | `test_i10_drive_receives_exactly_the_stored_vault` |
+| I11 | The key lives only in `chrome.storage.session` and the engine's memory, for at most six hours, and is gone after Lock, expiry, a browser restart and an extension reload. | `test_a2_*` |
+| I12 | A locked profile's titles, usernames, notes and URLs exist only inside its encrypted file: no index, cache, badge or message carries them. | `test_a3_a_locked_profile_is_unreachable_everywhere` |
+| I13 | `decide.js` returns the same action as the reference `decide()` for every input; `matching.js` agrees with the reference matching rules. | `test_a7_decide_js_agrees_with_python_on_every_input`, `test_a7_matching_js_agrees_with_python` |
+| U1 | Data written by an earlier version keeps working: the extension ID, the IndexedDB schema and the storage keys do not change without a migration. | `test_upgrade.py` |
 
-The "First tested" column comes from the milestone "Done when" lists. The spec does not name
-a milestone for I9.
+(I8, plaintext export behind a re-typed password, went with the desktop app; the extension exports
+an encrypted `.kdbx` only.)
 
 ## Known limits
 
-- **Memory:** Python cannot reliably erase secrets from memory. The app keeps secret lifetimes
-  short and documents this limit instead of claiming "safe memory handling".
-- **Profiles:** profiles are not a wall between people. Anyone using the same OS login can
-  install a keylogger. Real separation between people requires separate OS accounts.
-- **Master password:** no design can fix a weak one. The desktop app requires at least
-  12 characters and recommends a passphrase.
+- **Memory:** JavaScript cannot erase secrets from memory. Lifetimes are kept short and the limit
+  is documented rather than hidden.
+- **Profiles are labels**, not a wall between people. Anyone using the same browser profile can
+  open the extension; give each person their own browser profile or OS account.
+- **A weak master password** cannot be fixed by design. The vault page requires 12 characters and
+  recommends a passphrase.
