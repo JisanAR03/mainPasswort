@@ -83,6 +83,16 @@ modules join the `[S]` list); tests under `app/tests/e2e/`; `README.md` and the 
 | New-password suggestion | `inline.js`, `background.js` `menu_suggest`, `menu.js`, `fill.js` `fillNewPassword` | On an `autocomplete="new-password"` field of an unlocked vault; fills that field and its confirmation only after a click in the menu frame; never submits. |
 | Alt+Shift+P | `manifest.json` | `_execute_action`: opens the popup. (Not a one-key fill: that was not built.) |
 
+### Found by looking at Brave screenshots (all tests were green before these)
+
+| Problem | Fix | Test (fails on the old code) |
+|---|---|---|
+| The menu inside a transformed modal dialog was cut off at the dialog's edge | The in-dialog host is also a popover, shown in the top layer (not clipped, not offset by the dialog's transform) | the transformed-dialog test now checks the menu's last pixels |
+| Choice buttons ("Keep this computer's copy", "Upload this vault again") and an empty code row were visible when they should be hidden: `.row` overrode `hidden` (the sync buttons were already like this) | `[hidden] { display: none !important }` on the vault page | `test_parts_of_the_page_that_should_be_hidden_are_hidden` |
+| Closing the login form reset the settings form (blank client ID, unlock "1 hour", offer off) and blanked the generator options, so the next "Save settings" would save them (the reset-everything was already there) | `clearForms` skips the settings and rename forms; generator options are re-filled from the saved ones | `test_closing_a_login_form_leaves_the_settings_and_generator_options_alone` |
+| Menu rows were 46 px in the size maths but about 52 px on screen, so the last row of a menu was cut off (already so for several saved logins) | `MENU_ROW_PX = 52` | the menu-height assertion in `test_a_new_password_field_on_a_site_with_a_login_offers_both` |
+| An open health report vanished whenever the page refreshed itself (every sync status write) | the report is cleared only when you switch to the tab | `test_the_health_report_stays_while_the_page_refreshes_itself` |
+
 ### `[S]` files for the owner's review
 
 `extension/engine.js`, `local.js`, `background.js`, `sync.js`, `vault.js`, `inline.js`, `menu.js`,
