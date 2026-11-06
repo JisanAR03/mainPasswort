@@ -58,6 +58,30 @@ const failed = (reply) =>
       `Something went wrong (${reply.error ? reply.error.code : "unknown"}).`,
   );
 
+const DEFAULT_SETTINGS = {
+  googleClientId: "",
+  lockOnScreenLock: false,
+  lockAfterIdleMinutes: 0,
+  unlockHours: 6,
+  generator: { length: 20, upper: true, lower: true, digits: true, symbols: true, excludeLookalikes: true },
+};
+const OLDER_BACKGROUND =
+  "Personal Vault's background part is an older version than this page, so some things will not work yet. " +
+  "Open the browser's extensions page (brave://extensions or chrome://extensions), click the circular " +
+  "reload arrow on Personal Vault (not F5), then reopen this tab. Do not click Remove: it deletes the " +
+  "vaults kept in this browser.";
+
+// After an update the browser can keep running the PREVIOUS release's background script for a
+// while; it answers without the fields added since. Fill them in so the page still draws (it used
+// to throw before showing anything and stay blank). Returns true when a field was missing.
+function complete(result) {
+  const outdated = !Array.isArray(result.neverSave) || !(result.settings && result.settings.generator);
+  result.settings = { ...DEFAULT_SETTINGS, ...result.settings };
+  result.neverSave = Array.isArray(result.neverSave) ? result.neverSave : [];
+  result.offerToSave = result.offerToSave !== false;
+  return outdated;
+}
+
 function show(view) {
   for (const id of ["view-create", "view-unlock", "view-vault"]) $(id).hidden = id !== view;
   // opening a vault from Google Drive is offered whenever nothing is unlocked
@@ -105,10 +129,23 @@ function row(textParts, ...actions) {
 
 // --- rendering ---------------------------------------------------------------
 
+// Draw the page; if drawing fails, say so — never leave a blank page.
 async function refresh() {
+  try {
+    await draw();
+  } catch (error) {
+    notice("The page could not be drawn. Reload the extension on the browser's extensions page, then reopen this tab.");
+    throw error; // the console keeps the cause
+  }
+}
+
+async function draw() {
   const reply = await send("ext_state");
   if (!reply.ok) return failed(reply);
   state = reply.result;
+  const outdated = complete(state);
+  if (outdated) notice(OLDER_BACKGROUND);
+  else if ($("notice").textContent === OLDER_BACKGROUND) notice(""); // it has been reloaded since
   $("lock").hidden = !state.unlocked;
   if (!state.unlocked) {
     clearForms();
@@ -845,6 +882,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     send("ext_state").then((reply) => {
       if (reply.ok) {
         state = reply.result;
+        complete(state);
         if (!state.unlocked) refresh();
         else renderSync();
       }
