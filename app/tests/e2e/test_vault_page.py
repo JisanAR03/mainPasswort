@@ -346,7 +346,9 @@ def test_a_conflict_offers_merge_and_a_password_changed_elsewhere_offers_the_new
     page.fill("#rekey-password", NEW_PASSWORD)
     page.click("#sync-rekey button[type=submit]")
     page.wait_for_selector("#sync-rekey", state="hidden", timeout=30_000)
-    assert ext.sync_status(profile)["state"] == "synced"
+    # the form hides as soon as the copy is no longer "unreadable"; the sync that follows ends in
+    # "synced", and only that end state is asserted (a moment earlier it still says "syncing")
+    assert ext.wait_status(profile, {"synced"})["state"] == "synced"
 
 
 def test_the_health_report_stays_while_the_page_refreshes_itself(

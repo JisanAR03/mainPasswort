@@ -2,19 +2,22 @@
 
 The ID is the Chromium extension ID for a manifest key: the SHA-256 of the
 DER-encoded public key, first 16 bytes, each hex digit mapped 0-9a-f -> a-p.
-The private key stays in extension/key.pem (git-ignored); the public half goes
-into extension/manifest.json in M4-01. Re-running with an existing key.pem
-only prints the ID — it never replaces the key.
+The private key is kept OUTSIDE the extension folder (the browser warns about a key
+file inside it) and is never committed: by default in a "PasswordManager-keys" folder
+next to the repository, or wherever PV_KEY_PEM points. The public half goes into
+extension/manifest.json (already done). Re-running with an existing key only prints the
+ID — it never replaces the key, and it never edits the manifest.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-KEY_PEM = ROOT / "extension" / "key.pem"
+KEY_PEM = Path(os.environ.get("PV_KEY_PEM") or ROOT.parent / "PasswordManager-keys" / "key.pem")
 
 
 def _run(*args: str) -> bytes:
