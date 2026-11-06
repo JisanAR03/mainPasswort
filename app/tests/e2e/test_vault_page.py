@@ -432,3 +432,54 @@ def test_closing_a_login_form_leaves_the_settings_and_generator_options_alone(
     assert ext.state()["settings"]["googleClientId"] == "fake-client-id"
     assert ext.state()["settings"]["unlockHours"] == 2
     assert ext.state()["offerToSave"] is False
+
+
+# An update can leave the browser running the PREVIOUS release's background script for a
+# while (observed in Brave after a restart). That script answers the page without the
+# fields added since; the page used to throw before drawing anything and stayed blank.
+_OLDER_BACKGROUND = """
+(() => {
+  const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+  chrome.runtime.sendMessage = async (...args) => {
+    const reply = await send(...args);
+    if (args[0] && args[0].type === 'ext_state' && reply && reply.result && reply.result.settings) {
+      const { neverSave, offerToSave, ...rest } = reply.result;
+      const { generator, lockAfterIdleMinutes, unlockHours, ...settings } = rest.settings;
+      return { ...reply, result: { ...rest, settings } };
+    }
+    return reply;
+  };
+})();
+"""
+
+
+def test_the_vault_page_loads_without_errors(browser: BrowserContext, ext: Ext) -> None:
+    ext.create_profile("Personal")
+    ext.add_login(title="Bank")
+    errors: list[str] = []
+    page = browser.new_page()
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    page.goto(f"{EXTENSION_ORIGIN}/vault.html")
+    page.wait_for_selector("#view-vault", state="visible", timeout=30_000)
+    page.wait_for_selector("#entries li[data-id]")
+    assert errors == []
+
+
+def test_the_vault_page_still_shows_when_the_background_script_is_older(
+    browser: BrowserContext, ext: Ext
+) -> None:
+    ext.create_profile("Personal")
+    ext.add_login(title="Bank", username="me@bank.example")
+    errors: list[str] = []
+    page = browser.new_page()
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.add_init_script(_OLDER_BACKGROUND)
+    page.goto(f"{EXTENSION_ORIGIN}/vault.html")
+
+    page.wait_for_selector("#view-vault", state="visible", timeout=30_000)  # not a blank page
+    assert page.locator("#entries li[data-id] .title").all_inner_texts() == ["Bank"]
+    assert page.is_visible("#sync-panel") and page.is_visible("#settings-form")
+    _notice(page, "older version")  # and it says what to do about it
+    assert "reload" in page.inner_text("#notice").lower()
+    assert errors == []
